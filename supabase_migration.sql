@@ -1,6 +1,6 @@
 -- ============================================================
 -- M-Pesa Tracker Pro - Supabase Setup Migration
--- Run this in your Supabase SQL Editor (https://supabase.com/dashboard/project/nfegeltvychdouiywlxr/sql/new)
+-- Run this in your Supabase SQL Editor (https://supabase.com/dashboard/project/wcrcfitxlkymhcodqdfb/sql/new)
 -- ============================================================
 
 -- 1. Create the profiles table
