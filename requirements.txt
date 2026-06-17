@@ -1,0 +1,26 @@
+# M-Pesa Contribution Tracker - Python Dependencies
+
+# Core dependencies
+openpyxl>=3.1.0
+Pillow>=10.0.0
+
+# PDF parsing
+pdfplumber>=0.10.0
+
+# OCR (Tesseract)
+pytesseract>=0.3.10
+
+# Optional: Google Cloud Vision API
+# Uncomment if you want to use Google Vision API instead of Tesseract
+# google-cloud-vision>=3.0.0
+
+# GUI (tkinter is included with Python, but listed for reference)
+# tkinter>=8.6  # Usually included with Python installation
+
+# Additional utilities
+python-dateutil>=2.8.0
+
+# Web Application
+streamlit>=1.30.0
+pandas>=2.0.0
+
