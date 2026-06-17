@@ -55,6 +55,9 @@ enhanced_*.png
 .env
 .env.local
 
+# Streamlit secrets (contains Supabase keys)
+.streamlit/
+
 # Google Cloud credentials
 *.json
 !package.json

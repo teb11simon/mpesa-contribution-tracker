@@ -24,3 +24,6 @@ python-dateutil>=2.8.0
 streamlit>=1.30.0
 pandas>=2.0.0
 
+# Authentication & Backend (Supabase)
+supabase>=2.3.0
+

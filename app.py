@@ -33,6 +33,32 @@ EXPENSE_CATEGORIES = [
 ]
 TRANSFER_CATEGORIES = ["Missions Transfer", "Benevolence Transfer", "Contribution Transfer"]
 
+# ── Supabase Auth ────────────────────────────────────────────────────────
+@st.cache_resource
+def get_supabase():
+    """Initialize and return a Supabase client using anon key."""
+    import supabase
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return supabase.create_client(url, key)
+
+@st.cache_resource
+def get_supabase_admin():
+    """Initialize and return a Supabase client using service_role key (admin only)."""
+    import supabase
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
+    return supabase.create_client(url, key)
+
+# ── Profile helpers ──────────────────────────────────────────────────────
+def get_profile(user_id: str) -> dict | None:
+    """Fetch the profile row for a given user id."""
+    sup = get_supabase()
+    resp = sup.table("profiles").select("*").eq("id", user_id).maybe_single().execute()
+    if resp.data:
+        return resp.data
+    return None
+
 # Streamlit Page Config
 st.set_page_config(
     page_title="M-Pesa Contribution Tracker",
@@ -57,6 +83,205 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
+
+# ═════════════════════════════════════════════════════════════════════════
+#  AUTHENTICATION CHECK
+# ═════════════════════════════════════════════════════════════════════════
+
+# Use session state for auth token management
+if "supabase_session" not in st.session_state:
+    st.session_state.supabase_session = None
+if "user_profile" not in st.session_state:
+    st.session_state.user_profile = None
+
+# ── Render Auth Screen if not logged in ──────────────────────────────────
+if st.session_state.supabase_session is None:
+    st.markdown("<h1 style='text-align: center;'>💰 M-Pesa Tracker Pro</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: gray;'>Nairobi ICC Sunday Contribution Ledger</p>", unsafe_allow_html=True)
+
+    tab1, tab2 = st.tabs(["🔐 Login", "📝 Sign Up"])
+
+    with tab1:
+        with st.form("login_form"):
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Log In", use_container_width=True)
+            if submitted:
+                if not email or not password:
+                    st.error("Please enter both email and password.")
+                else:
+                    try:
+                        sup = get_supabase()
+                        res = sup.auth.sign_in_with_password({"email": email, "password": password})
+                        st.session_state.supabase_session = res.session
+                        # Fetch profile
+                        profile = get_profile(res.user.id)
+                        st.session_state.user_profile = profile
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Login failed: {e}")
+
+    with tab2:
+        with st.form("signup_form"):
+            new_email = st.text_input("Email")
+            new_password = st.text_input("Password", type="password", help="At least 6 characters")
+            submitted2 = st.form_submit_button("Create Account", use_container_width=True)
+            if submitted2:
+                if not new_email or not new_password:
+                    st.error("Please fill in all fields.")
+                elif len(new_password) < 6:
+                    st.error("Password must be at least 6 characters.")
+                else:
+                    try:
+                        sup = get_supabase()
+                        res = sup.auth.sign_up({"email": new_email, "password": new_password})
+                        st.success(
+                            "Account created! Please check your email for a confirmation link. "
+                            "Once confirmed, ask the admin to approve your account."
+                        )
+                    except Exception as e:
+                        st.error(f"Sign up failed: {e}")
+
+    st.stop()  # Don't render app content until authenticated
+
+# ── Check profile status ─────────────────────────────────────────────────
+profile = st.session_state.user_profile
+
+if profile is None:
+    # Try fetching again (e.g. after signup confirmation)
+    sup = get_supabase()
+    user = st.session_state.supabase_session.user
+    profile = get_profile(user.id)
+    st.session_state.user_profile = profile
+
+if profile is None:
+    st.warning("Your profile is not fully set up yet. Please contact the admin.")
+    if st.button("Log Out"):
+        st.session_state.supabase_session = None
+        st.session_state.user_profile = None
+        st.rerun()
+    st.stop()
+
+# ── Show pending screen ──────────────────────────────────────────────────
+if profile.get("status") == "pending":
+    st.markdown("<h1 style='text-align: center;'>💰 M-Pesa Tracker Pro</h1>", unsafe_allow_html=True)
+    st.info("⏳ Your account is pending admin approval. You'll be notified once approved.")
+    if st.button("Log Out"):
+        st.session_state.supabase_session = None
+        st.session_state.user_profile = None
+        st.rerun()
+    st.stop()
+
+# ── Show rejected screen ─────────────────────────────────────────────────
+if profile.get("status") == "rejected":
+    st.markdown("<h1 style='text-align: center;'>💰 M-Pesa Tracker Pro</h1>", unsafe_allow_html=True)
+    st.error("❌ Your account was rejected. Contact the admin for more information.")
+    if st.button("Log Out"):
+        st.session_state.supabase_session = None
+        st.session_state.user_profile = None
+        st.rerun()
+    st.stop()
+
+# ═════════════════════════════════════════════════════════════════════════
+#  AUTHENTICATED – Render App
+# ═════════════════════════════════════════════════════════════════════════
+
+# Sidebar with user info
+with st.sidebar:
+    st.image("https://img.icons8.com/color/96/money-transfer.png", width=80)
+    st.title("M-Pesa Tracker Pro")
+    st.subheader("Nairobi ICC Sunday Ledger")
+    st.markdown("---")
+    st.markdown(f"**Logged in as:** {profile.get('email', '')}")
+    st.markdown(f"**Role:** {'👑 Admin' if profile.get('role') == 'admin' else '👤 User'}")
+    if st.button("🚪 Log Out"):
+        st.session_state.supabase_session = None
+        st.session_state.user_profile = None
+        st.rerun()
+        st.markdown("---")
+
+    # Help upload current member mappings
+    st.markdown("### Aliases Configuration")
+    aliases_file = Path("member_aliases.json")
+    if aliases_file.exists():
+        with open(aliases_file, "r") as f:
+            st.download_button(
+                label="📥 Download Current member_aliases.json",
+                data=f.read(),
+                file_name="member_aliases.json",
+                mime="application/json"
+            )
+
+    uploaded_aliases = st.file_uploader("Upload existing member_aliases.json", type="json")
+    if uploaded_aliases is not None:
+        with open(aliases_file, "wb") as f:
+            f.write(uploaded_aliases.getvalue())
+        st.success("Successfully uploaded & loaded member_aliases.json!")
+        processor = get_processor()
+        if hasattr(processor, "matching_engine") and processor.matching_engine:
+            processor.matching_engine.load_aliases()
+
+# ═════════════════════════════════════════════════════════════════════════
+#  ADMIN PANEL (only for admin users)
+# ═════════════════════════════════════════════════════════════════════════
+if profile.get("role") == "admin":
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 🔧 Admin Panel")
+        if st.button("👥 Manage Users"):
+            st.session_state.show_admin_panel = not st.session_state.get("show_admin_panel", False)
+
+    if st.session_state.get("show_admin_panel", False):
+        st.markdown("## 👥 Admin Panel — User Management")
+        st.markdown("Approve or reject pending user registrations.")
+
+        try:
+            sup_admin = get_supabase_admin()
+            resp = sup_admin.table("profiles").select("*").order("created_at").execute()
+            users = resp.data if resp.data else []
+
+            if not users:
+                st.info("No users registered yet.")
+            else:
+                data_rows = []
+                for u in users:
+                    data_rows.append({
+                        "ID": u["id"][:8] + "...",
+                        "Email": u["email"],
+                        "Role": u["role"],
+                        "Status": u["status"],
+                        "Created": u.get("created_at", "")[:10] if u.get("created_at") else ""
+                    })
+                df_users = pd.DataFrame(data_rows)
+                st.dataframe(df_users, use_container_width=True, hide_index=True)
+
+                st.markdown("#### Approve / Reject Pending Users")
+                pending = [u for u in users if u["status"] == "pending"]
+                if not pending:
+                    st.success("No pending users!")
+                else:
+                    for u in pending:
+                        col1, col2, col3 = st.columns([3, 1, 1])
+                        with col1:
+                            st.write(f"**{u['email']}** — Joined {u.get('created_at', '')[:10]}")
+                        with col2:
+                            if st.button(f"✅ Approve", key=f"approve_{u['id']}"):
+                                sup_admin.table("profiles").update({"status": "approved"}).eq("id", u["id"]).execute()
+                                st.success(f"Approved {u['email']}")
+                                st.rerun()
+                        with col3:
+                            if st.button(f"❌ Reject", key=f"reject_{u['id']}"):
+                                sup_admin.table("profiles").update({"status": "rejected"}).eq("id", u["id"]).execute()
+                                st.success(f"Rejected {u['email']}")
+                                st.rerun()
+        except Exception as e:
+            st.error(f"Admin panel error: {e}")
+
+        st.markdown("---")
+
+# ═════════════════════════════════════════════════════════════════════════
+#  MAIN APPLICATION (Approved Users Only)
+# ═════════════════════════════════════════════════════════════════════════
 
 # Initialize Session State
 if "step" not in st.session_state:
@@ -91,35 +316,6 @@ processor = get_processor()
 ocr_proc = get_ocr_processor()
 parser = get_mpesa_parser()
 
-# Sidebar info
-with st.sidebar:
-    st.image("https://img.icons8.com/color/96/money-transfer.png", width=80)
-    st.title("M-Pesa Tracker Pro")
-    st.subheader("Nairobi ICC Sunday Ledger")
-    st.write("A secure web dashboard to process M-Pesa PDFs and note images, matching contributors with church members.")
-    st.markdown("---")
-    
-    # Help upload current member mappings
-    st.markdown("### Aliases Configuration")
-    aliases_file = Path("member_aliases.json")
-    if aliases_file.exists():
-        with open(aliases_file, "r") as f:
-            st.download_button(
-                label="📥 Download Current member_aliases.json",
-                data=f.read(),
-                file_name="member_aliases.json",
-                mime="application/json"
-            )
-    
-    uploaded_aliases = st.file_uploader("Upload existing member_aliases.json", type="json")
-    if uploaded_aliases is not None:
-        with open(aliases_file, "wb") as f:
-            f.write(uploaded_aliases.getvalue())
-        st.success("Successfully uploaded & loaded member_aliases.json!")
-        # Force re-init of matching engine
-        if hasattr(processor, "matching_engine") and processor.matching_engine:
-            processor.matching_engine.load_aliases()
-
 # Steps Wizard Headers
 cols = st.columns(3)
 step_names = ["1. Upload Files", "2. Categorize Transactions", "3. Match Names & Download"]
@@ -136,26 +332,26 @@ st.markdown("---")
 # ═════════════════════════════════════════════════════════════════════════
 if st.session_state.step == 1:
     st.markdown("### Upload M-Pesa PDF & Ledger Template")
-    
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.markdown("#### 1. Contribution Sources")
         uploaded_pdf = st.file_uploader("M-Pesa Statement (PDF or CSV)", type=["pdf", "csv"])
         pdf_password = st.text_input("M-Pesa PDF Password (if encrypted)", type="password", help="Usually your ID number")
-        
+
         st.markdown("#### 2. Cash Record Note Images (Optional)")
         img_contrib = st.file_uploader("Contribution Note Image", type=["png", "jpg", "jpeg", "bmp"])
         img_benev = st.file_uploader("Benevolence Note Image", type=["png", "jpg", "jpeg", "bmp"])
         img_missions = st.file_uploader("Missions Note Image", type=["png", "jpg", "jpeg", "bmp"])
-        
+
     with col2:
         st.markdown("#### 3. Master Ledger Template (Required)")
         uploaded_template = st.file_uploader("Upload Last Week's Completed Report Template (.xlsx)", type="xlsx")
-        
+
         st.markdown("#### 4. Settings & Metadata")
         report_date = st.date_input("Sunday Report Date", datetime.now())
-        
+
         col_m, col_w, col_c = st.columns(3)
         with col_m:
             men_count = st.number_input("Men Attendance", min_value=0, value=0, step=1)
@@ -163,7 +359,7 @@ if st.session_state.step == 1:
             women_count = st.number_input("Women Attendance", min_value=0, value=0, step=1)
         with col_c:
             children_count = st.number_input("Children Attendance", min_value=0, value=0, step=1)
-            
+
     if st.button("🚀 Process Uploads & Categorize", use_container_width=True):
         if not uploaded_template:
             st.error("Please upload last week's Excel template file.")
@@ -176,20 +372,20 @@ if st.session_state.step == 1:
                 temp_template_path = os.path.join(temp_dir, "temp_template.xlsx")
                 with open(temp_template_path, "wb") as f:
                     f.write(uploaded_template.getbuffer())
-                
+
                 st.session_state.temp_template_path = temp_template_path
                 st.session_state.report_date = report_date
                 st.session_state.attendance = {"men": men_count, "women": women_count, "children": children_count}
-                
+
                 all_trans = []
                 combined_breakdown = {}
-                
+
                 # 1. Parse PDF / CSV
                 if uploaded_pdf:
                     temp_pdf_path = os.path.join(temp_dir, uploaded_pdf.name)
                     with open(temp_pdf_path, "wb") as f:
                         f.write(uploaded_pdf.getbuffer())
-                    
+
                     try:
                         parsed = parser.parse_pdf(temp_pdf_path, pdf_password)
                         for t in parsed:
@@ -205,20 +401,20 @@ if st.session_state.step == 1:
                     except Exception as e:
                         st.error(f"Error parsing PDF: {e}")
                         st.stop()
-                
+
                 # 2. Process Cash Images
                 img_paths = {
                     "Contribution": img_contrib,
                     "Benevolence": img_benev,
                     "Missions": img_missions
                 }
-                
+
                 for cat, file_obj in img_paths.items():
                     if file_obj:
                         temp_img_path = os.path.join(temp_dir, file_obj.name)
                         with open(temp_img_path, "wb") as f:
                             f.write(file_obj.getbuffer())
-                        
+
                         try:
                             entries, breakdown = ocr_proc.process_image(temp_img_path)
                             for e in entries:
@@ -230,17 +426,17 @@ if st.session_state.step == 1:
                         except Exception as e:
                             st.error(f"Error performing OCR on {cat} image: {e}")
                             st.stop()
-                
+
                 st.session_state.all_trans = all_trans
                 st.session_state.cash_breakdown = combined_breakdown
-                
+
                 # Initialize DataFrame for Step 2
                 df_data = []
                 for idx, t in enumerate(all_trans):
                     sender = t.sender_name or ""
                     detail = t.details or ""
                     combined = f"{sender} ({detail})" if sender and detail else (sender or detail)
-                    
+
                     df_data.append({
                         "ID": idx + 1,
                         "Type": "IN" if t.transaction_type == "Paid In" else "OUT",
@@ -250,7 +446,7 @@ if st.session_state.step == 1:
                         "Category": getattr(t, 'pre_category', 'Ignore' if t.transaction_type == "Paid Out" else 'Contribution'),
                         "Notes": ""
                     })
-                
+
                 st.session_state.categorized_df = pd.DataFrame(df_data)
                 st.session_state.step = 2
                 st.rerun()
@@ -261,12 +457,12 @@ if st.session_state.step == 1:
 elif st.session_state.step == 2:
     st.markdown("### Step 2 of 3 — Categorize Transactions")
     st.write("Verify the system's categorization guesses. Mark items as 'Ignore' to exclude them from the ledger.")
-    
+
     # Edit in table
     categories_list = INCOME_CATEGORIES + EXPENSE_CATEGORIES + TRANSFER_CATEGORIES + ["Ignore"]
-    
+
     df = st.session_state.categorized_df
-    
+
     edited_df = st.data_editor(
         df,
         column_config={
@@ -282,30 +478,30 @@ elif st.session_state.step == 2:
         use_container_width=True,
         num_rows="fixed"
     )
-    
+
     # Store changes
     st.session_state.categorized_df = edited_df
-    
+
     col_back, col_next = st.columns([1, 1])
     with col_back:
         if st.button("← Back", use_container_width=True):
             st.session_state.step = 1
             st.rerun()
-            
+
     with col_next:
         if st.button("✓ Finish & Continue →", use_container_width=True):
             # Parse edited categories
             income = []
             expense = []
-            
+
             for idx, row in edited_df.iterrows():
                 t = st.session_state.all_trans[idx]
                 cat = row["Category"]
                 note = str(row["Notes"]).strip()
-                
+
                 if cat == "Ignore":
                     continue
-                    
+
                 entry = {
                     "receipt_no": t.receipt_no,
                     "date": t.date,
@@ -317,12 +513,12 @@ elif st.session_state.step == 2:
                     "sender_phone": t.sender_phone,
                     "category": cat
                 }
-                
+
                 if cat in INCOME_CATEGORIES:
                     income.append(entry)
                 else:
                     expense.append(entry)
-                    
+
             st.session_state.income_entries = income
             st.session_state.expense_entries = expense
             st.session_state.step = 3
@@ -333,7 +529,7 @@ elif st.session_state.step == 2:
 # ═════════════════════════════════════════════════════════════════════════
 elif st.session_state.step == 3:
     st.markdown("### Step 3 of 3 — Member Matching & Final Generation")
-    
+
     # Initialize/load members from template
     if "members" not in st.session_state or not st.session_state.members:
         with st.spinner("Extracting member list from Master Ledger template..."):
@@ -350,35 +546,35 @@ elif st.session_state.step == 3:
     members = st.session_state.members
     income_entries = st.session_state.income_entries
     expense_entries = st.session_state.expense_entries
-    
+
     # 1. Find unmatched names
     unmatched_names = []
     seen_unmatched = set()
-    
+
     for d in income_entries:
         sender_name = (d.get('sender_name') or d.get('name') or '').strip()
         if not sender_name:
             continue
-        
+
         match, _ = processor.matching_engine.find_match(sender_name, d.get('sender_phone'), d['amount'])
         if not match:
             if sender_name.lower() not in seen_unmatched:
                 unmatched_names.append({"name": sender_name, "amount": d['amount']})
                 seen_unmatched.add(sender_name.lower())
-                
+
     st.markdown("#### 1. Review Member Matches")
     if not unmatched_names:
         st.success("🎉 All contribution names match members perfectly!")
     else:
         st.warning("The following names from M-Pesa or Cash could not be matched to an existing member. Map them to aliases below if they correspond to an existing member (they will be saved automatically).")
-        
+
         # Build member list for dropdowns
         member_names = ["-- Select Member (Leave as Visitor) --"]
         for m in members:
             full_name = f"{m.get('first_name', '')} {m.get('last_name', '')}".strip()
             if full_name:
                 member_names.append(full_name)
-        
+
         # Render a form mapping names
         col_name, col_amt, col_member = st.columns([3, 1, 3])
         with col_name:
@@ -387,7 +583,7 @@ elif st.session_state.step == 3:
             st.markdown("**Amount**")
         with col_member:
             st.markdown("**Map to Existing Member**")
-            
+
         for idx, item in enumerate(unmatched_names):
             c_name, c_amt, c_sel = st.columns([3, 1, 3])
             with c_name:
@@ -407,7 +603,7 @@ elif st.session_state.step == 3:
                         st.toast(f"Saved mapping: {item['name']} ➔ {selected_member}")
                     except Exception as e:
                         st.error(f"Failed to save alias: {e}")
-                        
+
         st.info("💡 Clicking 'Refresh Page' after selecting mappings will update the list.")
         if st.button("🔄 Refresh Matches"):
             st.rerun()
@@ -415,13 +611,13 @@ elif st.session_state.step == 3:
     # 2. Excel Generation
     st.markdown("---")
     st.markdown("#### 2. Generate and Download Final Report")
-    
+
     col_back, col_gen = st.columns([1, 1])
     with col_back:
         if st.button("← Back to Categorization", use_container_width=True):
             st.session_state.step = 2
             st.rerun()
-            
+
     with col_gen:
         if st.button("✨ Compile Final Excel Report", use_container_width=True, type="primary"):
             with st.spinner("Generating Excel workbook..."):
@@ -431,10 +627,10 @@ elif st.session_state.step == 3:
                     report_dt = st.session_state.report_date
                     report_dt_parsed = datetime.combine(report_dt, datetime.min.time())
                     temp_output_path = os.path.join(temp_dir, f"Nairobi_Contribution_Report_{report_dt.strftime('%Y%m%d')}.xlsx")
-                    
+
                     # Set generator's cash breakdown
                     processor.generator.cash_breakdown = st.session_state.cash_breakdown
-                    
+
                     # Setup amount values for Bible Talk
                     for m in members:
                         m['amount'] = 0
@@ -445,10 +641,10 @@ elif st.session_state.step == 3:
                                 if m['row_index'] == match['row_index']:
                                     m['amount'] += d['amount']
                                     break
-                                    
+
                     matched_mpesa, unmatched_mpesa = [], []
                     matched_cash, unmatched_cash = [], []
-                    
+
                     for d in income_entries:
                         entry = dict(d)
                         sender_name  = (d.get('sender_name') or d.get('name') or '').strip()
@@ -470,13 +666,13 @@ elif st.session_state.step == 3:
                                 unmatched_cash.append(entry)
                             else:
                                 unmatched_mpesa.append(entry)
-                                
+
                     # Run creator report with matches
                     processor.generator.create_report_with_matches(
                         report_dt_parsed, temp_output_path,
                         matched_mpesa, unmatched_mpesa, matched_cash, unmatched_cash, members
                     )
-                    
+
                     # Finalize names conversions for all other tabs
                     for entry in unmatched_mpesa + unmatched_cash + expense_entries:
                         if (entry.get('category') or '').strip().lower() in {'missions', 'benevolence', 'contribution', 'missions transfer', 'benevolence transfer', 'contribution transfer'}:
@@ -486,13 +682,13 @@ elif st.session_state.step == 3:
                                 first = str(match.get('first_name', '')).strip()
                                 last  = str(match.get('last_name',  '')).strip()
                                 entry['name'] = f"{first} {last}".title() if (first or last) else sender_name
-                                
+
                     all_transactions_for_ledger = (
                         matched_mpesa + unmatched_mpesa +
                         matched_cash + unmatched_cash +
                         expense_entries
                     )
-                    
+
                     attn = st.session_state.attendance
                     processor.generator.finalize_report(
                         report_dt_parsed,
@@ -503,20 +699,20 @@ elif st.session_state.step == 3:
                         attendance=attn,
                         all_transactions=all_transactions_for_ledger
                     )
-                    
+
                     # Read generated file bytes for download
                     with open(temp_output_path, "rb") as f:
                         report_bytes = f.read()
-                        
+
                     st.session_state.report_bytes = report_bytes
                     st.session_state.report_filename = f"Nairobi_Contribution_Report_{report_dt.strftime('%b_%d_%Y')}.xlsx"
                     st.success("🎉 Report compiled successfully!")
-                    
+
                 except Exception as e:
                     st.error(f"Error compiling Excel report: {e}")
                     import traceback
                     st.text(traceback.format_exc())
-                    
+
     # Render download button if bytes are available
     if "report_bytes" in st.session_state:
         st.markdown("---")
@@ -527,7 +723,7 @@ elif st.session_state.step == 3:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
-        
+
         if st.button("🔄 Start Over / Process New Report", use_container_width=True):
             st.session_state.clear()
             st.session_state.step = 1
