@@ -1,0 +1,51 @@
+# Streamlit Advanced Configuration
+# https://docs.streamlit.io/library/advanced-features/configuration
+
+# ── Server Settings ─────────────────────────────────────────────────────
+[server]
+# Port to run the app on
+port = 8501
+# Address to bind to (0.0.0.0 for network access, 127.0.0.1 for local only)
+address = "127.0.0.1"
+# Enable CORS for API access (set to false for security if not needed)
+enableCORS = false
+# Enable XSRF protection (recommended for forms)
+enableXsrfProtection = true
+# Maximum upload size in MB (increase if handling large PDFs/images)
+maxUploadSize = 200
+# Maximum message size in MB
+maxMessageSize = 200
+# Disable telemetry
+gatherUsageStats = false
+
+# ── Browser Settings ────────────────────────────────────────────────────
+[browser]
+# Open browser automatically on start
+serverAddress = "localhost"
+serverPort = 8501
+gatherUsageStats = false
+
+# ── Theme / Appearance ──────────────────────────────────────────────────
+[theme]
+# Match the app's existing branding
+primaryColor = "#4472C4"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+font = "sans serif"
+
+# ── Client Settings ─────────────────────────────────────────────────────
+[client]
+# Show full error traces in the app (helpful for debugging)
+showErrorDetails = true
+# Disable toolbar for cleaner look in production
+toolbarMode = "minimal"
+
+# ── Runner Settings ─────────────────────────────────────────────────────
+[runner]
+# Enable magic commands
+magicEnabled = true
+# Handle script rerun immediately
+fastReruns = true
+# Enable script execution
+enforceSerializableSessionState = false

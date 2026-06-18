@@ -56,7 +56,10 @@ enhanced_*.png
 .env.local
 
 # Streamlit secrets (contains Supabase keys)
-.streamlit/
+.streamlit/secrets.toml
+.streamlit/credentials.toml
+# Allow Streamlit config.toml to be committed
+!.streamlit/config.toml
 
 # Google Cloud credentials
 *.json
