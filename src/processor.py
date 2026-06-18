@@ -11,20 +11,25 @@ from pathlib import Path
 from mpesa_parser import MpesaParser
 from excel_generator import ExcelGenerator
 from matching_engine import MatchingEngine
+from settings_manager import SettingsManager
 
 logger = logging.getLogger(__name__)
 
 class ContributionProcessor:
-    def __init__(self):
+    def __init__(self, church_slug: str = "nairobi-icc"):
+        self.church_slug = church_slug
         self.parser = MpesaParser()
         self.generator = ExcelGenerator()
         self.matching_engine: Optional[MatchingEngine] = None
+        self.settings = SettingsManager(church_slug=church_slug)
 
     def prepare_template(self, template_path: str):
         """Loads the template and prepares the generator/matching engine"""
         self.generator.load_template(template_path)
         members = self.generator._get_members_from_combined()
-        self.matching_engine = MatchingEngine(members)
+        # Use church-specific aliases file path
+        aliases_path = str(self.settings.get_aliases_path())
+        self.matching_engine = MatchingEngine(members, aliases_file=aliases_path)
         return members
 
     def process_weekly_report(

@@ -4,6 +4,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 import io
+import json
 import pandas as pd
 import streamlit as st
 
@@ -33,6 +34,17 @@ EXPENSE_CATEGORIES = [
 ]
 TRANSFER_CATEGORIES = ["Missions Transfer", "Benevolence Transfer", "Contribution Transfer"]
 
+# ── Helper: Get church directory ────────────────────────────────────────
+def get_church_dir(church_slug: str) -> Path:
+    """Get the filesystem directory for a given church."""
+    church_dir = Path("churches") / church_slug
+    church_dir.mkdir(parents=True, exist_ok=True)
+    return church_dir
+
+def get_aliases_path(church_slug: str) -> Path:
+    """Get the member_aliases.json path for a given church."""
+    return get_church_dir(church_slug) / "member_aliases.json"
+
 # ── Supabase Auth ────────────────────────────────────────────────────────
 @st.cache_resource
 def get_supabase():
@@ -49,6 +61,20 @@ def get_supabase_admin():
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
     return supabase.create_client(url, key)
+
+# ── Church helpers ──────────────────────────────────────────────────────
+@st.cache_data(ttl=60)
+def get_churches():
+    """Fetch all churches from Supabase."""
+    sup = get_supabase()
+    resp = sup.table("churches").select("*").order("name").execute()
+    return resp.data if resp.data else []
+
+def get_church_by_id(church_id: str) -> dict | None:
+    """Fetch a single church by ID."""
+    sup = get_supabase()
+    resp = sup.table("churches").select("*").eq("id", church_id).maybe_single().execute()
+    return resp.data if resp.data else None
 
 # ── Profile helpers ──────────────────────────────────────────────────────
 def get_profile(user_id: str) -> dict | None:
@@ -93,11 +119,13 @@ if "supabase_session" not in st.session_state:
     st.session_state.supabase_session = None
 if "user_profile" not in st.session_state:
     st.session_state.user_profile = None
+if "church_info" not in st.session_state:
+    st.session_state.church_info = None
 
 # ── Render Auth Screen if not logged in ──────────────────────────────────
 if st.session_state.supabase_session is None:
     st.markdown("<h1 style='text-align: center;'>💰 M-Pesa Tracker Pro</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: gray;'>Nairobi ICC Sunday Contribution Ledger</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: gray;'>Multi-Church Sunday Contribution Ledger</p>", unsafe_allow_html=True)
 
     tab1, tab2 = st.tabs(["🔐 Login", "📝 Sign Up"])
 
@@ -117,6 +145,12 @@ if st.session_state.supabase_session is None:
                         # Fetch profile
                         profile = get_profile(res.user.id)
                         st.session_state.user_profile = profile
+
+                        # Fetch church info
+                        if profile and profile.get("church_id"):
+                            church = get_church_by_id(profile["church_id"])
+                            st.session_state.church_info = church
+
                         st.rerun()
                     except Exception as e:
                         st.error(f"Login failed: {e}")
@@ -125,6 +159,19 @@ if st.session_state.supabase_session is None:
         with st.form("signup_form"):
             new_email = st.text_input("Email")
             new_password = st.text_input("Password", type="password", help="At least 6 characters")
+            
+            # Church selection during signup
+            churches = get_churches()
+            church_options = {c["name"]: c["id"] for c in churches}
+            church_names = list(church_options.keys())
+            
+            selected_church_name = st.selectbox(
+                "Select Your Church",
+                options=church_names,
+                index=0,
+                help="Choose the church you belong to. If your church isn't listed, contact the super admin."
+            )
+            
             submitted2 = st.form_submit_button("Create Account", use_container_width=True)
             if submitted2:
                 if not new_email or not new_password:
@@ -134,10 +181,27 @@ if st.session_state.supabase_session is None:
                 else:
                     try:
                         sup = get_supabase()
-                        res = sup.auth.sign_up({"email": new_email, "password": new_password})
+                        # Sign up with metadata including church_id
+                        res = sup.auth.sign_up({
+                            "email": new_email,
+                            "password": new_password,
+                            "options": {
+                                "data": {
+                                    "church_id": church_options[selected_church_name]
+                                }
+                            }
+                        })
+                        
+                        # If signup succeeded, update the profile's church_id
+                        if res.user:
+                            sup_admin = get_supabase_admin()
+                            sup_admin.table("profiles").update({
+                                "church_id": church_options[selected_church_name]
+                            }).eq("id", res.user.id).execute()
+                        
                         st.success(
                             "Account created! Please check your email for a confirmation link. "
-                            "Once confirmed, ask the admin to approve your account."
+                            "Once confirmed, ask your church admin to approve your account."
                         )
                     except Exception as e:
                         st.error(f"Sign up failed: {e}")
@@ -159,26 +223,39 @@ if profile is None:
     if st.button("Log Out"):
         st.session_state.supabase_session = None
         st.session_state.user_profile = None
+        st.session_state.church_info = None
         st.rerun()
     st.stop()
+
+# ── Ensure church_info is loaded ─────────────────────────────────────────
+if st.session_state.church_info is None and profile.get("church_id"):
+    church = get_church_by_id(profile["church_id"])
+    st.session_state.church_info = church
+
+church_info = st.session_state.church_info
+church_name = church_info["name"] if church_info else "Your Church"
+church_slug = church_info["slug"] if church_info else "nairobi-icc"
+is_super_admin = (profile.get("role") == "admin")
 
 # ── Show pending screen ──────────────────────────────────────────────────
 if profile.get("status") == "pending":
     st.markdown("<h1 style='text-align: center;'>💰 M-Pesa Tracker Pro</h1>", unsafe_allow_html=True)
-    st.info("⏳ Your account is pending admin approval. You'll be notified once approved.")
+    st.info(f"⏳ Your account for **{church_name}** is pending admin approval. You'll be notified once approved.")
     if st.button("Log Out"):
         st.session_state.supabase_session = None
         st.session_state.user_profile = None
+        st.session_state.church_info = None
         st.rerun()
     st.stop()
 
 # ── Show rejected screen ─────────────────────────────────────────────────
 if profile.get("status") == "rejected":
     st.markdown("<h1 style='text-align: center;'>💰 M-Pesa Tracker Pro</h1>", unsafe_allow_html=True)
-    st.error("❌ Your account was rejected. Contact the admin for more information.")
+    st.error("❌ Your account was rejected. Contact your church admin for more information.")
     if st.button("Log Out"):
         st.session_state.supabase_session = None
         st.session_state.user_profile = None
+        st.session_state.church_info = None
         st.rerun()
     st.stop()
 
@@ -190,54 +267,59 @@ if profile.get("status") == "rejected":
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/money-transfer.png", width=80)
     st.title("M-Pesa Tracker Pro")
-    st.subheader("Nairobi ICC Sunday Ledger")
+    st.subheader(f"🏛️ {church_name}")
     st.markdown("---")
     st.markdown(f"**Logged in as:** {profile.get('email', '')}")
-    st.markdown(f"**Role:** {'👑 Admin' if profile.get('role') == 'admin' else '👤 User'}")
+    st.markdown(f"**Role:** {'👑 Super Admin' if is_super_admin else '👤 User'}")
+    st.markdown(f"**Church:** {church_name}")
     if st.button("🚪 Log Out"):
         st.session_state.supabase_session = None
         st.session_state.user_profile = None
+        st.session_state.church_info = None
         st.rerun()
-        st.markdown("---")
+    st.markdown("---")
 
-    # Help upload current member mappings
+    # Help upload current member mappings (per-church)
     st.markdown("### Aliases Configuration")
-    aliases_file = Path("member_aliases.json")
+    aliases_file = get_aliases_path(church_slug)
     if aliases_file.exists():
         with open(aliases_file, "r") as f:
             st.download_button(
                 label="📥 Download Current member_aliases.json",
                 data=f.read(),
-                file_name="member_aliases.json",
+                file_name=f"{church_slug}_member_aliases.json",
                 mime="application/json"
             )
 
-    uploaded_aliases = st.file_uploader("Upload existing member_aliases.json", type="json")
+    uploaded_aliases = st.file_uploader(f"Upload {church_name} member_aliases.json", type="json")
     if uploaded_aliases is not None:
         with open(aliases_file, "wb") as f:
             f.write(uploaded_aliases.getvalue())
-        st.success("Successfully uploaded & loaded member_aliases.json!")
-        processor = get_processor()
+        st.success(f"Successfully uploaded & loaded member_aliases.json for {church_name}!")
+        processor = get_processor(church_slug)
         if hasattr(processor, "matching_engine") and processor.matching_engine:
             processor.matching_engine.load_aliases()
 
 # ═════════════════════════════════════════════════════════════════════════
-#  ADMIN PANEL (only for admin users)
+#  SUPER ADMIN PANEL (only for super admin users - role='admin')
 # ═════════════════════════════════════════════════════════════════════════
-if profile.get("role") == "admin":
+if is_super_admin:
     with st.sidebar:
         st.markdown("---")
-        st.markdown("### 🔧 Admin Panel")
-        if st.button("👥 Manage Users"):
+        st.markdown("### 🔧 Super Admin Panel")
+        if st.button("👥 Admin: Manage Users"):
             st.session_state.show_admin_panel = not st.session_state.get("show_admin_panel", False)
+        if st.button("🏛️ Admin: Manage Churches"):
+            st.session_state.show_church_panel = not st.session_state.get("show_church_panel", False)
 
+    # ── User Management Panel ────────────────────────────────────────────────
     if st.session_state.get("show_admin_panel", False):
-        st.markdown("## 👥 Admin Panel — User Management")
-        st.markdown("Approve or reject pending user registrations.")
+        st.markdown("## 👥 Super Admin — User Management")
+        st.markdown("Approve or reject pending user registrations across all churches.")
 
         try:
             sup_admin = get_supabase_admin()
-            resp = sup_admin.table("profiles").select("*").order("created_at").execute()
+            resp = sup_admin.table("profiles").select("*, churches(name)").order("created_at").execute()
             users = resp.data if resp.data else []
 
             if not users:
@@ -245,9 +327,11 @@ if profile.get("role") == "admin":
             else:
                 data_rows = []
                 for u in users:
+                    church_name_row = u.get("churches", {}).get("name", "Unknown") if u.get("churches") else "Unknown"
                     data_rows.append({
                         "ID": u["id"][:8] + "...",
                         "Email": u["email"],
+                        "Church": church_name_row,
                         "Role": u["role"],
                         "Status": u["status"],
                         "Created": u.get("created_at", "")[:10] if u.get("created_at") else ""
@@ -261,21 +345,91 @@ if profile.get("role") == "admin":
                     st.success("No pending users!")
                 else:
                     for u in pending:
-                        col1, col2, col3 = st.columns([3, 1, 1])
+                        church_name_row = u.get("churches", {}).get("name", "Unknown") if u.get("churches") else "Unknown"
+                        col1, col2, col3, col4 = st.columns([2.5, 1.5, 1, 1])
                         with col1:
-                            st.write(f"**{u['email']}** — Joined {u.get('created_at', '')[:10]}")
+                            st.write(f"**{u['email']}**")
                         with col2:
+                            st.write(f"Church: {church_name_row}")
+                        with col3:
                             if st.button(f"✅ Approve", key=f"approve_{u['id']}"):
                                 sup_admin.table("profiles").update({"status": "approved"}).eq("id", u["id"]).execute()
                                 st.success(f"Approved {u['email']}")
                                 st.rerun()
-                        with col3:
+                        with col4:
                             if st.button(f"❌ Reject", key=f"reject_{u['id']}"):
                                 sup_admin.table("profiles").update({"status": "rejected"}).eq("id", u["id"]).execute()
                                 st.success(f"Rejected {u['email']}")
                                 st.rerun()
         except Exception as e:
             st.error(f"Admin panel error: {e}")
+
+        st.markdown("---")
+
+    # ── Church Management Panel ────────────────────────────────────────────────
+    if st.session_state.get("show_church_panel", False):
+        st.markdown("## 🏛️ Super Admin — Church Management")
+        st.markdown("Create new churches for the platform.")
+
+        # List existing churches
+        try:
+            sup_admin = get_supabase_admin()
+            churches_data = get_churches()
+            
+            if churches_data:
+                st.markdown("### Existing Churches")
+                church_rows = []
+                for c in churches_data:
+                    church_rows.append({
+                        "Name": c["name"],
+                        "Slug": c["slug"],
+                        "Created": c.get("created_at", "")[:10] if c.get("created_at") else ""
+                    })
+                st.dataframe(pd.DataFrame(church_rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("No churches configured yet.")
+        except Exception as e:
+            st.error(f"Error loading churches: {e}")
+
+        st.markdown("### Create New Church")
+        with st.form("create_church_form"):
+            new_church_name = st.text_input("Church Name", help="e.g., 'Nairobi ICC', 'Mombasa ICC', etc.")
+            new_church_slug = st.text_input(
+                "Church Slug",
+                help="URL-friendly identifier (e.g., 'nairobi-icc', 'mombasa-icc'). "
+                     "Use lowercase letters, numbers, and hyphens only."
+            )
+            
+            submitted_church = st.form_submit_button("Create Church", use_container_width=True)
+            if submitted_church:
+                if not new_church_name or not new_church_slug:
+                    st.error("Please fill in both church name and slug.")
+                else:
+                    # Validate slug format
+                    import re
+                    if not re.match(r'^[a-z0-9-]+$', new_church_slug):
+                        st.error("Slug must contain only lowercase letters, numbers, and hyphens.")
+                    else:
+                        try:
+                            sup_admin.table("churches").insert({
+                                "name": new_church_name,
+                                "slug": new_church_slug
+                            }).execute()
+                            
+                            # Create the church directory
+                            get_church_dir(new_church_slug)
+                            
+                            # Clear cached churches
+                            get_churches.clear()
+                            
+                            st.success(f"Church '{new_church_name}' created successfully!")
+                            st.rerun()
+                        except Exception as e:
+                            error_msg = str(e)
+                            if "duplicate key" in error_msg.lower():
+                                st.error(f"A church with slug '{new_church_slug}' already exists.")
+                            else:
+                                st.error(f"Failed to create church: {e}")
 
         st.markdown("---")
 
@@ -299,10 +453,10 @@ if "attendance" not in st.session_state:
 if "categorized_df" not in st.session_state:
     st.session_state.categorized_df = None
 
-# Initialize Singletons
+# Initialize Singletons (per-church)
 @st.cache_resource
-def get_processor():
-    return ContributionProcessor()
+def get_processor(church_slug_param: str = "nairobi-icc"):
+    return ContributionProcessor(church_slug=church_slug_param)
 
 @st.cache_resource
 def get_ocr_processor():
@@ -312,7 +466,7 @@ def get_ocr_processor():
 def get_mpesa_parser():
     return MpesaParser()
 
-processor = get_processor()
+processor = get_processor(church_slug)
 ocr_proc = get_ocr_processor()
 parser = get_mpesa_parser()
 
@@ -331,7 +485,7 @@ st.markdown("---")
 #  STEP 1 — Upload Screen
 # ═════════════════════════════════════════════════════════════════════════
 if st.session_state.step == 1:
-    st.markdown("### Upload M-Pesa PDF & Ledger Template")
+    st.markdown(f"### Upload M-Pesa PDF & Ledger Template — {church_name}")
 
     col1, col2 = st.columns(2)
 
@@ -347,7 +501,7 @@ if st.session_state.step == 1:
 
     with col2:
         st.markdown("#### 3. Master Ledger Template (Required)")
-        uploaded_template = st.file_uploader("Upload Last Week's Completed Report Template (.xlsx)", type="xlsx")
+        uploaded_template = st.file_uploader(f"Upload {church_name}'s Last Completed Report Template (.xlsx)", type="xlsx")
 
         st.markdown("#### 4. Settings & Metadata")
         report_date = st.date_input("Sunday Report Date", datetime.now())
@@ -369,7 +523,7 @@ if st.session_state.step == 1:
             with st.spinner("Processing statement and images..."):
                 # Save ledger template locally temporarily
                 temp_dir = tempfile.gettempdir()
-                temp_template_path = os.path.join(temp_dir, "temp_template.xlsx")
+                temp_template_path = os.path.join(temp_dir, f"{church_slug}_temp_template.xlsx")
                 with open(temp_template_path, "wb") as f:
                     f.write(uploaded_template.getbuffer())
 
@@ -382,7 +536,7 @@ if st.session_state.step == 1:
 
                 # 1. Parse PDF / CSV
                 if uploaded_pdf:
-                    temp_pdf_path = os.path.join(temp_dir, uploaded_pdf.name)
+                    temp_pdf_path = os.path.join(temp_dir, f"{church_slug}_{uploaded_pdf.name}")
                     with open(temp_pdf_path, "wb") as f:
                         f.write(uploaded_pdf.getbuffer())
 
@@ -411,7 +565,7 @@ if st.session_state.step == 1:
 
                 for cat, file_obj in img_paths.items():
                     if file_obj:
-                        temp_img_path = os.path.join(temp_dir, file_obj.name)
+                        temp_img_path = os.path.join(temp_dir, f"{church_slug}_{file_obj.name}")
                         with open(temp_img_path, "wb") as f:
                             f.write(file_obj.getbuffer())
 
@@ -528,7 +682,7 @@ elif st.session_state.step == 2:
 #  STEP 3 — Name Matching & Download
 # ═════════════════════════════════════════════════════════════════════════
 elif st.session_state.step == 3:
-    st.markdown("### Step 3 of 3 — Member Matching & Final Generation")
+    st.markdown(f"### Step 3 of 3 — Member Matching & Final Generation — {church_name}")
 
     # Initialize/load members from template
     if "members" not in st.session_state or not st.session_state.members:
@@ -626,7 +780,12 @@ elif st.session_state.step == 3:
                     temp_dir = tempfile.gettempdir()
                     report_dt = st.session_state.report_date
                     report_dt_parsed = datetime.combine(report_dt, datetime.min.time())
-                    temp_output_path = os.path.join(temp_dir, f"Nairobi_Contribution_Report_{report_dt.strftime('%Y%m%d')}.xlsx")
+                    
+                    # Church-specific filename
+                    temp_output_path = os.path.join(
+                        temp_dir,
+                        f"{church_slug}_Contribution_Report_{report_dt.strftime('%Y%m%d')}.xlsx"
+                    )
 
                     # Set generator's cash breakdown
                     processor.generator.cash_breakdown = st.session_state.cash_breakdown
@@ -705,7 +864,7 @@ elif st.session_state.step == 3:
                         report_bytes = f.read()
 
                     st.session_state.report_bytes = report_bytes
-                    st.session_state.report_filename = f"Nairobi_Contribution_Report_{report_dt.strftime('%b_%d_%Y')}.xlsx"
+                    st.session_state.report_filename = f"{church_name}_Contribution_Report_{report_dt.strftime('%b_%d_%Y')}.xlsx"
                     st.success("🎉 Report compiled successfully!")
 
                 except Exception as e:

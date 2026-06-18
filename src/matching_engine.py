@@ -2,16 +2,20 @@ import json, os, re, difflib
 from typing import List, Dict, Optional, Tuple
 
 class MatchingEngine:
-    def __init__(self, members: List[Dict], aliases_file: str = "member_aliases.json"):
+    def __init__(self, members: List[Dict], aliases_file: Optional[str] = None):
         """
         Args:
             members: List of member dicts with 'first_name', 'last_name', 'phone', 'ministry'
-            aliases_file: Path to JSON file for manual mappings
+            aliases_file: Path to JSON file for manual mappings. If None, defaults to 'member_aliases.json'
         """
         self.members = members
-        self.aliases_file = aliases_file
+        self.aliases_file = aliases_file or "member_aliases.json"
         self.manual_aliases = self._load_aliases()
         self._normalize_member_list()
+
+    def load_aliases(self):
+        """Reload aliases from disk (useful after uploading a new aliases file)."""
+        self.manual_aliases = self._load_aliases()
 
     def _load_aliases(self) -> Dict[str, str]:
         """Loads learned name mappings from JSON"""
