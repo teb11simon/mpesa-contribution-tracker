@@ -459,7 +459,7 @@ def get_processor(church_slug_param: str = "nairobi-icc"):
     return ContributionProcessor(church_slug=church_slug_param)
 
 @st.cache_resource
-def get_ocr_processor(ocr_backend: str = "easyocr"):
+def get_ocr_processor(ocr_backend: str = "tesseract"):
     return OCRProcessor(ocr_backend=ocr_backend)
 
 @st.cache_resource
@@ -467,7 +467,7 @@ def get_mpesa_parser():
     return MpesaParser()
 
 processor = get_processor(church_slug)
-ocr_proc = get_ocr_processor(st.session_state.get("ocr_backend", "easyocr"))
+ocr_proc = get_ocr_processor(st.session_state.get("ocr_backend", "tesseract"))
 parser = get_mpesa_parser()
 
 # Steps Wizard Headers
@@ -499,10 +499,10 @@ if st.session_state.step == 1:
         # OCR Engine selector
         ocr_choice = st.selectbox(
             "OCR Engine for Handwriting",
-            options=["easyocr", "tesseract", "google_vision"],
+            options=["tesseract", "easyocr", "google_vision"],
             index=0,
-            help="easyocr = best for handwriting (free, local, deep learning)\n"
-                 "tesseract = good for printed text (free, local)\n"
+            help="tesseract = good for printed text (free, local, works on Streamlit Cloud)\n"
+                 "easyocr = best for handwriting (free, local, requires >1GB RAM)\n"
                  "google_vision = cloud-based (requires API key)"
         )
         if "ocr_backend" not in st.session_state or st.session_state.ocr_backend != ocr_choice:
