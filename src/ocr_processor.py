@@ -1,6 +1,11 @@
 """
 OCR Module for Processing Handwritten Contribution Notes
 Extracts names and amounts from images using OCR
+
+Supports three backends:
+- "tesseract" (default) - Free, good for printed text, poor handwriting (requires Tesseract.exe)
+- "easyocr" (recommended) - Free, deep learning-based, excellent handwriting recognition
+- "google_vision" - Cloud-based, pay-per-use, very good handwriting (requires API key)
 """
 
 import re
@@ -22,23 +27,28 @@ class ContributionEntry:
 class OCRProcessor:
     """Process images to extract contribution data"""
 
-    def __init__(self, use_google_vision: bool = False):
+    def __init__(self, ocr_backend: str = "tesseract"):
         """
         Initialize OCR processor
 
         Args:
-            use_google_vision: If True, use Google Cloud Vision API (requires API key)
-                              If False, use Tesseract (local)
+            ocr_backend: Which OCR engine to use:
+                - "tesseract" - Local, free, good for printed text, poor handwriting
+                - "easyocr"   - Local, free, deep learning-based, excellent handwriting
+                - "google_vision" - Cloud, pay-per-use, very good handwriting
         """
-        self.use_google_vision = use_google_vision
+        self.ocr_backend = ocr_backend.lower()
         self.entries: List[ContributionEntry] = []
+        self.breakdown: Dict[float, float] = {}
 
     def process_image(self, image_path: str) -> Tuple[List[ContributionEntry], Dict[float, float]]:
         """
         Process an image to extract contribution entries and cash breakdown
         """
-        if self.use_google_vision:
+        if self.ocr_backend == "google_vision":
             text = self._extract_text_google_vision(image_path)
+        elif self.ocr_backend == "easyocr":
+            text = self._extract_text_easyocr(image_path)
         else:
             text = self._extract_text_tesseract(image_path)
 
@@ -107,6 +117,37 @@ class OCRProcessor:
         
         text = pytesseract.image_to_string(image)
         return text
+
+    def _extract_text_easyocr(self, image_path: str) -> str:
+        """
+        Extract text using EasyOCR (deep learning based).
+        Significantly better for handwriting than Tesseract,
+        and completely free (no API key needed).
+        """
+        try:
+            import easyocr
+        except ImportError:
+            raise ImportError(
+                "EasyOCR required. Install with:\n"
+                "pip install easyocr"
+            )
+
+        # Initialize reader (will download model on first run)
+        # 'en' for English only keeps it smaller and faster
+        reader = easyocr.Reader(['en'], gpu=False)
+
+        # Read text from image
+        results = reader.readtext(image_path, paragraph=True)
+
+        # Extract just the text from results, joined by newlines
+        # EasyOCR returns list of (bbox, text, confidence) tuples
+        lines = []
+        for (bbox, text, confidence) in results:
+            text = text.strip()
+            if text:
+                lines.append(text)
+
+        return '\n'.join(lines)
 
     def _extract_text_google_vision(self, image_path: str) -> str:
         """Extract text using Google Cloud Vision API"""

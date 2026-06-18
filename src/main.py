@@ -975,7 +975,7 @@ class App(tk.Tk):
         self.registry = MemberRegistry()
         self.processor = ContributionProcessor()
         self.settings = SettingsManager()
-        self.ocr = OCRProcessor()
+        self.ocr = OCRProcessor(ocr_backend=self.settings.get("ocr_backend", "easyocr"))
         self.parser = MpesaParser()
         self._show_step1()
 

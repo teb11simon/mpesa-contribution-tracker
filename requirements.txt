@@ -7,11 +7,14 @@ Pillow>=10.0.0
 # PDF parsing
 pdfplumber>=0.10.0
 
-# OCR (Tesseract)
+# OCR (Tesseract - good for printed text)
 pytesseract>=0.3.10
 
+# OCR (EasyOCR - deep learning, excellent for handwriting, recommended)
+easyocr>=1.7
+
 # Optional: Google Cloud Vision API
-# Uncomment if you want to use Google Vision API instead of Tesseract
+# Uncomment if you want to use Google Vision API instead of Tesseract/EasyOCR
 # google-cloud-vision>=3.0.0
 
 # GUI (tkinter is included with Python, but listed for reference)

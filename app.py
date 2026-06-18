@@ -19,7 +19,7 @@ try:
     from processor import ContributionProcessor
     from category_memory import CategoryMemory
     from member_registry import MemberRegistry
-    from ocr_processor import OCRProcessor
+    from ocr_processor import OCRProcessor, ImagePreprocessor
     from settings_manager import SettingsManager
 except ImportError as e:
     st.error(f"CRITICAL ERROR: A module is missing: {e}")
@@ -459,15 +459,15 @@ def get_processor(church_slug_param: str = "nairobi-icc"):
     return ContributionProcessor(church_slug=church_slug_param)
 
 @st.cache_resource
-def get_ocr_processor():
-    return OCRProcessor()
+def get_ocr_processor(ocr_backend: str = "easyocr"):
+    return OCRProcessor(ocr_backend=ocr_backend)
 
 @st.cache_resource
 def get_mpesa_parser():
     return MpesaParser()
 
 processor = get_processor(church_slug)
-ocr_proc = get_ocr_processor()
+ocr_proc = get_ocr_processor(st.session_state.get("ocr_backend", "easyocr"))
 parser = get_mpesa_parser()
 
 # Steps Wizard Headers
@@ -495,6 +495,21 @@ if st.session_state.step == 1:
         pdf_password = st.text_input("M-Pesa PDF Password (if encrypted)", type="password", help="Usually your ID number")
 
         st.markdown("#### 2. Cash Record Note Images (Optional)")
+
+        # OCR Engine selector
+        ocr_choice = st.selectbox(
+            "OCR Engine for Handwriting",
+            options=["easyocr", "tesseract", "google_vision"],
+            index=0,
+            help="easyocr = best for handwriting (free, local, deep learning)\n"
+                 "tesseract = good for printed text (free, local)\n"
+                 "google_vision = cloud-based (requires API key)"
+        )
+        if "ocr_backend" not in st.session_state or st.session_state.ocr_backend != ocr_choice:
+            st.session_state.ocr_backend = ocr_choice
+            get_ocr_processor.clear()
+            st.rerun()
+
         img_contrib = st.file_uploader("Contribution Note Image", type=["png", "jpg", "jpeg", "bmp"])
         img_benev = st.file_uploader("Benevolence Note Image", type=["png", "jpg", "jpeg", "bmp"])
         img_missions = st.file_uploader("Missions Note Image", type=["png", "jpg", "jpeg", "bmp"])

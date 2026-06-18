@@ -60,7 +60,7 @@ class ContributionProcessor:
         combined_breakdown = {}
         if cont_image_path or benev_image_path or miss_image_path:
             from ocr_processor import OCRProcessor
-            ocr = OCRProcessor()
+            ocr = OCRProcessor(ocr_backend=self.settings.get("ocr_backend", "easyocr"))
             image_configs = [(cont_image_path, "Contribution"), (benev_image_path, "Benevolence"), (miss_image_path, "Missions")]
             for path, category in image_configs:
                 if path:
