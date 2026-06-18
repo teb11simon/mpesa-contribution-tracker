@@ -279,26 +279,85 @@ with st.sidebar:
         st.rerun()
     st.markdown("---")
 
-    # Help upload current member mappings (per-church)
-    st.markdown("### Aliases Configuration")
-    aliases_file = get_aliases_path(church_slug)
-    if aliases_file.exists():
-        with open(aliases_file, "r") as f:
-            st.download_button(
-                label="📥 Download Current member_aliases.json",
-                data=f.read(),
-                file_name=f"{church_slug}_member_aliases.json",
-                mime="application/json"
-            )
+    # Member Management from Template
+    st.markdown("### 👥 Manage Members")
+    st.caption("Edit members directly from your uploaded template")
 
-    uploaded_aliases = st.file_uploader(f"Upload {church_name} member_aliases.json", type="json")
-    if uploaded_aliases is not None:
-        with open(aliases_file, "wb") as f:
-            f.write(uploaded_aliases.getvalue())
-        st.success(f"Successfully uploaded & loaded member_aliases.json for {church_name}!")
-        processor = get_processor(church_slug)
-        if hasattr(processor, "matching_engine") and processor.matching_engine:
-            processor.matching_engine.load_aliases()
+    if st.button("📋 Open Member Manager", use_container_width=True):
+        st.session_state.show_member_manager = not st.session_state.get("show_member_manager", False)
+
+    if st.session_state.get("show_member_manager", False):
+        st.markdown("#### Current Members")
+        # Load template if available
+        template_path = st.session_state.get("temp_template_path", "")
+        if template_path and Path(template_path).exists():
+            try:
+                processor.prepare_template(template_path)
+                members = processor.generator._get_members_from_combined()
+                if members:
+                    member_data = []
+                    for m in members:
+                        member_data.append({
+                            "Name": f"{m.get('first_name', '')} {m.get('last_name', '')}".strip(),
+                            "Region": m.get('region', ''),
+                            "Bible Talk": m.get('bible_talk', ''),
+                            "Ministry": m.get('ministry', ''),
+                            "Pledge": m.get('pledge', 0)
+                        })
+                    st.dataframe(pd.DataFrame(member_data), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No members found in template.")
+            except Exception as e:
+                st.error(f"Error loading members: {e}")
+        else:
+            st.info("Upload a template in Step 1 to manage members.")
+
+        st.markdown("#### Add New Member")
+        with st.form("add_member_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                new_first = st.text_input("First Name *")
+                new_last = st.text_input("Last Name *")
+                new_region = st.text_input("Region", value="")
+            with col2:
+                new_bible_talk = st.text_input("Bible Talk", value="")
+                new_ministry = st.selectbox("Ministry", ["Campus", "Singles", "Marrieds", "Teens"])
+                new_pledge = st.text_input("Pledge", value="0")
+
+            if st.form_submit_button("➕ Add Member"):
+                if new_first and new_last:
+                    try:
+                        processor.generator.load_template(template_path)
+                        new_path = processor.generator.add_member(
+                            new_region, new_bible_talk, new_ministry,
+                            new_first, new_last, new_pledge
+                        )
+                        st.success(f"Added {new_first} {new_last}!")
+                        # Update the template path in session state
+                        if new_path:
+                            st.session_state.temp_template_path = new_path
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to add member: {e}")
+                else:
+                    st.warning("First Name and Last Name are required.")
+
+        st.markdown("#### Remove Member")
+        if members:
+            member_names = [f"{m.get('first_name', '')} {m.get('last_name', '')}".strip() for m in members]
+            member_to_remove = st.selectbox("Select member to remove", options=member_names)
+            removal_type = st.radio("Removal Type", ["fallaway", "moveaway"], horizontal=True)
+            if st.button("🗑️ Remove Selected Member"):
+                if member_to_remove:
+                    try:
+                        processor.generator.load_template(template_path)
+                        new_path = processor.generator.remove_member(member_to_remove.split()[0], removal_type)
+                        st.success(f"Removed {member_to_remove} as {removal_type}")
+                        if new_path:
+                            st.session_state.temp_template_path = new_path
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to remove member: {e}")
 
 # ═════════════════════════════════════════════════════════════════════════
 #  SUPER ADMIN PANEL (only for super admin users - role='admin')
