@@ -6,9 +6,9 @@
 # Port to run the app on
 port = 8501
 # Address to bind to (0.0.0.0 for network access, 127.0.0.1 for local only)
-address = "127.0.0.1"
-# Enable CORS for API access (set to false for security if not needed)
-enableCORS = false
+address = "0.0.0.0"
+# Enable CORS for API access
+enableCORS = true
 # Enable XSRF protection (recommended for forms)
 enableXsrfProtection = true
 # Maximum upload size in MB (increase if handling large PDFs/images)
@@ -17,6 +17,8 @@ maxUploadSize = 200
 maxMessageSize = 200
 # Disable telemetry
 gatherUsageStats = false
+# Headless mode for Hugging Face Spaces
+headless = true
 
 # ── Browser Settings ────────────────────────────────────────────────────
 [browser]

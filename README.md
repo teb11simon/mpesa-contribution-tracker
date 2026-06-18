@@ -1,138 +1,61 @@
-# M-Pesa Contribution Tracker
+---
+title: M-Pesa Contribution Tracker
+emoji: 💰
+colorFrom: blue
+colorTo: green
+sdk: streamlit
+sdk_version: 1.30.0
+app_file: app.py
+pinned: false
+---
 
-A Windows desktop application that processes M-Pesa statements and contribution notes images to generate Excel contribution reports.
+# M-Pesa Contribution Tracker Pro
+
+Multi-Church Sunday Contribution Ledger — Track M-Pesa and cash contributions with **AI-powered handwriting recognition** (EasyOCR).
 
 ## Features
+- 📄 Parse M-Pesa PDF statements automatically
+- 📸 Read handwritten cash contribution notes using EasyOCR
+- 📊 Generate formatted Excel reports (Summary, Bible Talk, Combined, Income & Expenses)
+- 🏛️ Multi-church support with Supabase auth
+- 👤 Member matching with aliases
 
-- **M-Pesa Statement Parsing**: Extract transactions from PDF or CSV M-Pesa statements
-- **OCR Processing**: Extract contribution data from handwritten notes images
-- **Excel Generation**: Create formatted Excel reports with multiple sheets
-- **Image Enhancement**: Improve OCR accuracy with image preprocessing
-- **Categorization**: Automatically categorize contributions (Contribution, Benevolence, Missions)
+## Live Demo
+[![Hugging Face Spaces](https://img.shields.io/badge/🤗%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/YOUR_USERNAME/mpesa-contribution-tracker)
 
-## Requirements
-
-- Python 3.8 or higher
-- Windows 10 or later
-
-## Installation
-
-### 1. Install Python
-
-Download and install Python from [python.org](https://www.python.org/downloads/)
-
-Make sure to check "Add Python to PATH" during installation.
-
-### 2. Install Tesseract OCR (Required for local OCR)
-
-Download and install Tesseract OCR for Windows:
-
-1. Go to [UB Mannheim Tesseract Wiki](https://github.com/UB-Mannheim/tesseract/wiki)
-2. Download the latest Windows installer (e.g., `tesseract-ocr-w64-setup-5.x.x.exe`)
-3. Run the installer and complete the installation
-4. Add Tesseract to your PATH (usually: `C:\Program Files\Tesseract-OCR`)
-
-### 3. Install Python Dependencies
-
-Open Command Prompt or PowerShell and run:
-
+## Local Development
 ```bash
-cd "c:\Users\User\Documents\Personal project\mpesa-contribution-tracker"
 pip install -r requirements.txt
+streamlit run app.py
 ```
 
-### 4. (Optional) Google Cloud Vision API
+## Deployment to Hugging Face Spaces
 
-For better OCR accuracy, you can use Google Cloud Vision API instead of Tesseract:
+### Prerequisites
+1. A [Hugging Face](https://huggingface.co/) account (free)
+2. Your Supabase project credentials
+3. This repository pushed to GitHub
 
-1. Create a Google Cloud project
-2. Enable the Vision API
-3. Create a service account and download the JSON key file
-4. Set the environment variable:
-   ```bash
-   set GOOGLE_APPLICATION_CREDENTIALS=path\to\your\key.json
+### Step-by-Step
+
+1. **Go to** https://huggingface.co/new-space
+2. **Configure:**
+   - Space Name: `mpesa-contribution-tracker`
+   - License: `MIT`
+   - SDK: **Streamlit**
+   - Hardware: **CPU (free)** — it's enough for EasyOCR
+3. **Connect your GitHub repo** or upload files manually
+4. **Add Secrets** (in Space Settings → Repository Secrets):
    ```
+   SUPABASE_URL = https://wcrcfitxlkymhcodqdfb.supabase.co
+   SUPABASE_KEY = eyJhbGciOiJIUzI1NiIs...
+   SUPABASE_SERVICE_ROLE_KEY = eyJhbGciOiJIUzI1NiIs...
+   ```
+5. **Set `streamlit run app.py`** as the entry command
+6. **Deploy** — first run will download EasyOCR model (~200MB), subsequent runs are instant
 
-## Usage
-
-### Running the Application
-
-```bash
-cd "c:\Users\User\Documents\Personal project\mpesa-contribution-tracker"
-python src/main.py
-```
-
-### Using the App
-
-1. **Upload M-Pesa Statement**: Click "Browse..." to select your M-Pesa statement (PDF or CSV)
-2. **Upload Contribution Notes**: Click "Browse..." to select an image of handwritten contribution notes
-3. **Set Options**:
-   - Choose the report date
-   - Optionally enable Google Vision API for better OCR
-   - Enable image enhancement for better OCR accuracy
-4. **Generate Report**: Click "Generate Excel Report"
-5. **View Results**: The app will process the files and generate an Excel report
-
-### Supported Image Formats
-
-- PNG
-- JPG/JPEG
-- BMP
-- TIFF
-
-### Supported M-Pesa Statement Formats
-
-- PDF
-- CSV
-
-## Project Structure
-
-```
-mpesa-contribution-tracker/
-├── src/
-│   ├── __init__.py
-│   ├── main.py              # Main GUI application
-│   ├── mpesa_parser.py      # M-Pesa statement parser
-│   ├── ocr_processor.py     # OCR processing module
-│   └── excel_generator.py   # Excel report generator
-├── output/                  # Generated Excel reports
-├── requirements.txt         # Python dependencies
-└── README.md               # This file
-```
-
-## Troubleshooting
-
-### Tesseract Not Found
-
-If you get an error about Tesseract not being found:
-
-1. Make sure Tesseract is installed
-2. Add it to your Windows PATH:
-   - Search for "Environment Variables" in Windows
-   - Edit "Path" under System Variables
-   - Add: `C:\Program Files\Tesseract-OCR`
-3. Restart Command Prompt/PowerShell
-
-### PDF Parsing Issues
-
-If PDF parsing fails:
-
-1. Make sure `pdfplumber` is installed: `pip install pdfplumber`
-2. Try converting the PDF to CSV first and use the CSV parser
-
-### OCR Accuracy
-
-For better OCR results:
-
-1. Use clear, well-lit photos
-2. Enable "Enhance image for better OCR" option
-3. Consider using Google Vision API (requires API key)
-4. Write names and amounts clearly
-
-## License
-
-MIT License
-
-## Support
-
-For issues or questions, please contact the development team.
+### Important Notes
+- Hugging Face Spaces free tier gives **16GB RAM + 2 vCPU** — plenty for EasyOCR + PyTorch
+- The EasyOCR model downloads automatically on first run, then stays cached
+- Keep `easyocr>=1.7` in `requirements.txt`
+- Do **not** include `packets.txt` with tesseract (not needed for EasyOCR)
