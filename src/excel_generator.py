@@ -736,7 +736,7 @@ class ExcelGenerator:
         logger.info(f"Attendance recorded for {date_val} in row {target_row} (Men: {men}, Women: {women}, Children: {children}).")
         print(f"DEBUG: Attendance recorded for {date_val} in row {target_row}")
 
-    def _update_bible_talk_report(self, members: List[Dict]):
+    def _update_bible_talk_report(self, members: List[Dict], all_transactions: Optional[List[Dict]] = None):
         """Groups members by Bible Talk in a multi-column grid layout matching the dashboard style"""
         try:
             sheet_name = next((s for s in self.workbook.sheetnames if "Bible Talk" in s), None)
@@ -760,7 +760,19 @@ class ExcelGenerator:
             for merged_range in list(ws.merged_cells.ranges):
                 ws.unmerge_cells(str(merged_range))
 
-            # 2. Group members by Bible Talk
+            # 2. Build Contribution-only totals per member
+            contribution_by_row: Dict[int, float] = {}
+            if all_transactions:
+                for t in all_transactions:
+                    category = (t.get('category') or '').strip().lower()
+                    if category != 'contribution':
+                        continue
+                    member_row = t.get('member_row')
+                    if member_row is None:
+                        continue
+                    contribution_by_row[member_row] = contribution_by_row.get(member_row, 0.0) + (t.get('amount', 0) or 0)
+
+            # 3. Group members by Bible Talk
             bt_groups = {}
             for m in members:
                 bt_raw = (m.get('bible_talk') or "Other").strip()
@@ -828,7 +840,7 @@ class ExcelGenerator:
                     if m.get('is_bold'): p_cell.font = self.styles['bold']
                     
                     # 4. Contribution Box (Amount + Color)
-                    amount = m.get('amount', 0)
+                    amount = contribution_by_row.get(m.get('row_index'), 0.0)
                     color_cell = ws.cell(row=row_idx, column=col_start+3, value=amount if amount > 0 else "")
                     color_cell.border = self.styles['border']
                     color_cell.alignment = self.styles['center']
@@ -902,7 +914,7 @@ class ExcelGenerator:
             )
             
         # Update Bible Talk Report
-        self._update_bible_talk_report(members)
+        self._update_bible_talk_report(members, all_transactions=all_transactions)
 
         # Update Income & Exp tab with all expense transactions
         if all_transactions:
