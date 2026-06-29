@@ -1514,21 +1514,6 @@ class ExcelGenerator:
                 if cat == 'contribution' and src == 'cash':
                     cont_cash += amt
 
-        # ── 3a. Read latest running balance from Income & Exp sheet for Contribution total ──
-        cont_total = 0.0
-        if "Income & Exp" in self.workbook.sheetnames:
-            try:
-                ws_ie = self.workbook["Income & Exp"]
-                for r in range(ws_ie.max_row, 5, -1):
-                    b_val = ws_ie.cell(row=r, column=2).value
-                    if b_val is not None and str(b_val).strip() not in ('', '.'):
-                        balance_cell = ws_ie.cell(row=r, column=7).value
-                        if balance_cell is not None:
-                            cont_total = float(balance_cell)
-                        break
-            except Exception:
-                cont_total = 0.0
-
         # ── 3b. Benevolence: read latest balance from Benevolence sheet ──
         bene_total = 0.0
         if "Benevolence" in self.workbook.sheetnames:
@@ -1569,9 +1554,9 @@ class ExcelGenerator:
 
         new_mission_cash_in_hand = prev_mission_cash_in_hand + missions_cash
 
-        # Contribution: Cash In Hand is running total, Mpesa = Total - Cash
+        # Contribution: Cash In Hand is running total, Mpesa left blank for manual entry
         contribution_cash_in_hand = prev_contribution_cash_in_hand + cont_cash
-        cont_mpesa = cont_total - contribution_cash_in_hand
+        cont_mpesa = ""  # Leave blank for manual entry
 
         # Benevolence: Cash In Hand is running total, Mpesa = Total - Cash
         bene_cash_in_hand = prev_bene_cash_in_hand + benevolence_total_cash
@@ -1634,7 +1619,7 @@ class ExcelGenerator:
         ws.cell(row=7, column=2, value=cont_mpesa)
         ws.cell(row=7, column=3, value=contribution_cash_in_hand)
         ws.cell(row=7, column=4, value=0)
-        ws.cell(row=7, column=5, value=cont_total)
+        ws.cell(row=7, column=5, value="=B7+C7")
 
         ws.cell(row=7, column=7, value=date_str)
         ws.cell(row=7, column=8, value=bene_mpesa)
