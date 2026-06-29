@@ -779,7 +779,8 @@ elif st.session_state.step == 3:
     income_entries = st.session_state.income_entries
     expense_entries = st.session_state.expense_entries
 
-    # 1. Find unmatched names
+    # 1. Find matched and unmatched names
+    matched_names = []
     unmatched_names = []
     seen_unmatched = set()
 
@@ -788,13 +789,40 @@ elif st.session_state.step == 3:
         if not sender_name:
             continue
 
-        match, _ = processor.matching_engine.find_match(sender_name, d.get('sender_phone'), d['amount'])
-        if not match:
+        match, score = processor.matching_engine.find_match(sender_name, d.get('sender_phone'), d['amount'])
+        if match:
+            matched_names.append({
+                "original_name": sender_name,
+                "matched_to": f"{match.get('first_name', '')} {match.get('last_name', '')}".strip(),
+                "amount": d['amount'],
+                "confidence": score
+            })
+        else:
             if sender_name.lower() not in seen_unmatched:
                 unmatched_names.append({"name": sender_name, "amount": d['amount']})
                 seen_unmatched.add(sender_name.lower())
 
     st.markdown("#### 1. Review Member Matches")
+    
+    # 1a. View Matched Names
+    with st.expander(f"✅ View Confirmed Matches ({len(matched_names)})", expanded=False):
+        if not matched_names:
+            st.info("No matches found yet.")
+        else:
+            match_df = pd.DataFrame(matched_names)
+            st.dataframe(
+                match_df,
+                column_config={
+                    "original_name": "Receipt/Statement Name",
+                    "matched_to": "Matched Member",
+                    "amount": st.column_config.NumberColumn("Amount", format="Ksh %,.2f"),
+                    "confidence": st.column_config.ProgressColumn("Confidence", min_value=0.0, max_value=1.0)
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+
+    # 1b. Resolve Unmatched Names
     if not unmatched_names:
         st.success("🎉 All contribution names match members perfectly!")
     else:
@@ -806,6 +834,15 @@ elif st.session_state.step == 3:
             full_name = f"{m.get('first_name', '')} {m.get('last_name', '')}".strip()
             if full_name:
                 member_names.append(full_name)
+
+        def save_alias_callback(u_name, w_key):
+            sel_member = st.session_state[w_key]
+            if sel_member != "-- Select Member (Leave as Visitor) --":
+                try:
+                    processor.matching_engine.save_alias(u_name, sel_member)
+                    st.toast(f"Saved mapping: {u_name} ➔ {sel_member}")
+                except Exception as e:
+                    st.error(f"Failed to save alias: {e}")
 
         # Render a form mapping names
         col_name, col_amt, col_member = st.columns([3, 1, 3])
@@ -823,22 +860,18 @@ elif st.session_state.step == 3:
             with c_amt:
                 st.write(f"Ksh {item['amount']:,.2f}")
             with c_sel:
-                selected_member = st.selectbox(
+                # Use a unique key based on the name to prevent state leakage when items shift
+                widget_key = f"alias_map_{idx}_{item['name']}"
+                st.selectbox(
                     f"Map '{item['name']}'",
                     options=member_names,
-                    key=f"alias_map_{idx}",
-                    label_visibility="collapsed"
+                    key=widget_key,
+                    label_visibility="collapsed",
+                    on_change=save_alias_callback,
+                    args=(item["name"], widget_key)
                 )
-                if selected_member != "-- Select Member (Leave as Visitor) --":
-                    try:
-                        processor.matching_engine.save_alias(item["name"], selected_member)
-                        st.toast(f"Saved mapping: {item['name']} ➔ {selected_member}")
-                    except Exception as e:
-                        st.error(f"Failed to save alias: {e}")
 
-        st.info("💡 Clicking 'Refresh Page' after selecting mappings will update the list.")
-        if st.button("🔄 Refresh Matches"):
-            st.rerun()
+        st.info("💡 Changes are saved automatically and the list will update immediately.")
 
     # 2. Excel Generation
     st.markdown("---")
