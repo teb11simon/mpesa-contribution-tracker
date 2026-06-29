@@ -59,6 +59,10 @@ class MatchingEngine:
 
         query_name = query_name.strip().lower()
         
+        # 0. Check for explicit "Unmatch" directive
+        if self.manual_aliases.get(query_name) == "--UNMATCHED--":
+            return None, 0.0
+        
         # 1. Manual Aliases & Special Cases (Learned from User)
         manual_match = self._check_manual_aliases(query_name, query_phone, amount)
         if manual_match:

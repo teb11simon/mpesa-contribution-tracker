@@ -795,7 +795,8 @@ elif st.session_state.step == 3:
                 "original_name": sender_name,
                 "matched_to": f"{match.get('first_name', '')} {match.get('last_name', '')}".strip(),
                 "amount": d['amount'],
-                "confidence": score
+                "confidence": score,
+                "unmatch": False
             })
         else:
             if sender_name.lower() not in seen_unmatched:
@@ -804,22 +805,36 @@ elif st.session_state.step == 3:
 
     st.markdown("#### 1. Review Member Matches")
     
+    # Cache list for the callback
+    st.session_state.matched_names_list = matched_names
+
     # 1a. View Matched Names
     with st.expander(f"✅ View Confirmed Matches ({len(matched_names)})", expanded=False):
         if not matched_names:
             st.info("No matches found yet.")
         else:
+            def unmatch_callback():
+                changes = st.session_state.get("matched_names_editor", {}).get("edited_rows", {})
+                for row_idx, edits in changes.items():
+                    if edits.get("unmatch") is True:
+                        orig_name = st.session_state.matched_names_list[int(row_idx)]["original_name"]
+                        processor.matching_engine.save_alias(orig_name, "--UNMATCHED--")
+                        st.toast(f"Unmatched '{orig_name}'")
+
             match_df = pd.DataFrame(matched_names)
-            st.dataframe(
+            st.data_editor(
                 match_df,
                 column_config={
-                    "original_name": "Receipt/Statement Name",
-                    "matched_to": "Matched Member",
-                    "amount": st.column_config.NumberColumn("Amount", format="Ksh %,.2f"),
-                    "confidence": st.column_config.ProgressColumn("Confidence", min_value=0.0, max_value=1.0)
+                    "original_name": st.column_config.TextColumn("Receipt/Statement Name", disabled=True),
+                    "matched_to": st.column_config.TextColumn("Matched Member", disabled=True),
+                    "amount": st.column_config.NumberColumn("Amount", format="Ksh %,.2f", disabled=True),
+                    "confidence": st.column_config.ProgressColumn("Confidence", min_value=0.0, max_value=1.0, disabled=True),
+                    "unmatch": st.column_config.CheckboxColumn("Unmatch?", default=False)
                 },
                 hide_index=True,
-                use_container_width=True
+                use_container_width=True,
+                key="matched_names_editor",
+                on_change=unmatch_callback
             )
 
     # 1b. Resolve Unmatched Names
