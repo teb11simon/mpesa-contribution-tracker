@@ -952,7 +952,7 @@ elif st.session_state.step == 3:
                     "original_name": st.column_config.TextColumn("Receipt/Statement Name", disabled=True),
                     "matched_to": st.column_config.TextColumn("Matched Member", disabled=True),
                     "amount": st.column_config.NumberColumn("Amount", format="Ksh %,.2f", disabled=True),
-                    "confidence": st.column_config.ProgressColumn("Confidence", min_value=0.0, max_value=1.0, disabled=True),
+                    "confidence": st.column_config.ProgressColumn("Confidence", min_value=0.0, max_value=1.0),
                     "unmatch": st.column_config.CheckboxColumn("Unmatch?", default=False)
                 },
                 hide_index=True,
