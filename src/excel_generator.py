@@ -618,15 +618,26 @@ class ExcelGenerator:
                 logger.warning(f"Combined: could not find row for {m.get('first_name')} {m.get('last_name')} — skipping.")
                 continue
 
-            # Calculate total give (contribution + missions) matching column H of weekly tab
+            # Retrieve total give (contribution + missions) by reading absolute value directly from column H of weekly tab
             master_row = m.get('row_index', current_row)
-            cont_total = sum(t.get('amount', 0) for t in mpesa_transactions if t.get('member_row') == master_row and str(t.get('category', '')).lower().startswith('cont'))
-            cont_total += sum(c.get('amount', 0) for c in cash_entries if c.get('member_row') == master_row and str(c.get('category', '')).lower().startswith('cont'))
+            weekly_row = master_row + 8
             
-            miss_total = sum(t.get('amount', 0) for t in mpesa_transactions if t.get('member_row') == master_row and str(t.get('category', '')).lower().startswith('miss'))
-            miss_total += sum(c.get('amount', 0) for c in cash_entries if c.get('member_row') == master_row and str(c.get('category', '')).lower().startswith('miss'))
-            
-            amount = cont_total + miss_total
+            amount = 0
+            try:
+                ws_weekly = self.workbook[date_str]
+                weekly_val = ws_weekly.cell(row=weekly_row, column=8).value
+                # If it's an absolute value (float/int), use it. If it's a formula, we fallback to recalculating
+                if isinstance(weekly_val, (int, float)):
+                    amount = weekly_val
+                else:
+                    # Fallback calculation if the weekly sheet hasn't been saved as data-only yet
+                    cont_total = sum(t.get('amount', 0) for t in mpesa_transactions if t.get('member_row') == master_row and str(t.get('category', '')).lower().startswith('cont'))
+                    cont_total += sum(c.get('amount', 0) for c in cash_entries if c.get('member_row') == master_row and str(c.get('category', '')).lower().startswith('cont'))
+                    miss_total = sum(t.get('amount', 0) for t in mpesa_transactions if t.get('member_row') == master_row and str(t.get('category', '')).lower().startswith('miss'))
+                    miss_total += sum(c.get('amount', 0) for c in cash_entries if c.get('member_row') == master_row and str(c.get('category', '')).lower().startswith('miss'))
+                    amount = cont_total + miss_total
+            except Exception:
+                amount = 0
             data_cell = ws.cell(row=current_row, column=9, value=amount)
             data_cell.border        = _full_border
             data_cell.number_format = self.styles['currency']
