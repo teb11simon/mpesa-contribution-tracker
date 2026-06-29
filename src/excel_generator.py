@@ -1,4 +1,4 @@
-"""
+ """
 Excel Generator
 Creates Excel contribution reports by updating a master template workbook.
 Supports formula preservation and automated sheet linking.
@@ -1501,15 +1501,12 @@ class ExcelGenerator:
 
         contribution_mpesa = _cat_total('Contribution')
         contribution_cash  = _cat_total('Contribution')
-        benevolence_mpesa  = _cat_total('Benevolence')
-        benevolence_cash   = _cat_total('Benevolence')
+        benevolence_total_cash = _cat_total('Benevolence')
         missions_cash      = _cat_total('Missions')
 
-        # For Contribution/Benevolence, try to split Mpesa vs Cash from matched/unmatched
+        # For Contribution, try to split Mpesa vs Cash from matched/unmatched
         cont_mpesa = 0.0
         cont_cash  = 0.0
-        bene_mpesa = 0.0
-        bene_cash  = 0.0
         if all_transactions:
             for t in all_transactions:
                 cat = (t.get('category') or '').strip().lower()
@@ -1520,22 +1517,29 @@ class ExcelGenerator:
                         cont_cash += amt
                     else:
                         cont_mpesa += amt
-                elif cat == 'benevolence':
-                    if src == 'cash':
-                        bene_cash += amt
-                    else:
-                        bene_mpesa += amt
 
         # If split didn't populate, fall back to totals
         if cont_mpesa == 0 and cont_cash == 0 and contribution_mpesa > 0:
             cont_mpesa = contribution_mpesa
             cont_cash  = contribution_mpesa
-        if bene_mpesa == 0 and bene_cash == 0 and benevolence_mpesa > 0:
-            bene_mpesa = benevolence_mpesa
-            bene_cash  = benevolence_mpesa
 
-        # ── 3. Read previous Breakdown sheet for Cash In Hand carry-forward ──
-        prev_cash_in_hand = 0.0
+        # ── 3a. Benevolence: read latest balance from Benevolence sheet ──
+        bene_total = 0.0
+        if "Benevolence" in self.workbook.sheetnames:
+            try:
+                ws_bene = self.workbook["Benevolence"]
+                for r in range(ws_bene.max_row, 3, -1):
+                    if ws_bene.cell(row=r, column=1).value is not None:
+                        balance_val = ws_bene.cell(row=r, column=4).value
+                        if balance_val is not None:
+                            bene_total = float(balance_val)
+                        break
+            except Exception:
+                bene_total = 0.0
+
+        # ── 3b. Read previous Breakdown sheet for Cash In Hand carry-forward ──
+        prev_mission_cash_in_hand = 0.0
+        prev_bene_cash_in_hand = 0.0
         prev_sheet = None
         for name in self.workbook.sheetnames:
             if 'breakdown' in name.lower() and name != sheet_name:
@@ -1545,18 +1549,19 @@ class ExcelGenerator:
         if prev_sheet:
             try:
                 ws_prev = self.workbook[prev_sheet]
-                # Cash In Hand under Missions block is in column H (col 8), row 7 (first data row)
-                # We scan for the Missions block header to locate the right cell
-                for r in range(1, 20):
-                    val = ws_prev.cell(row=r, column=7).value  # col G
-                    if val and 'missions' in str(val).lower():
-                        # Cash In Hand is typically col H (8) in the row below header
-                        prev_cash_in_hand = ws_prev.cell(row=r+1, column=8).value or 0.0
-                        break
+                # Missions Cash In Hand is col H (8) row 2
+                prev_mission_cash_in_hand = ws_prev.cell(row=2, column=9).value or 0.0
+                # Benevolence Cash In Hand is col I (9) row 7
+                prev_bene_cash_in_hand = ws_prev.cell(row=7, column=9).value or 0.0
             except Exception:
-                prev_cash_in_hand = 0.0
+                prev_mission_cash_in_hand = 0.0
+                prev_bene_cash_in_hand = 0.0
 
-        new_cash_in_hand = prev_cash_in_hand + missions_cash
+        new_mission_cash_in_hand = prev_mission_cash_in_hand + missions_cash
+
+        # Benevolence: Cash In Hand is running total, Mpesa = Total - Cash
+        bene_cash_in_hand = prev_bene_cash_in_hand + benevolence_total_cash
+        bene_mpesa = bene_total - bene_cash_in_hand
 
         # ── 4. Write Total Balances section ───────────────────────────
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=5)
@@ -1581,7 +1586,7 @@ class ExcelGenerator:
         # Mpesa ZIIDI: copy formula from previous sheet if available, else use the known formula
         mpesa_ziidi_formula = "='Income & Exp'!C3 + Missions!C2 - SUMIF('Income & Exp'!E:E,\"Missions Transfer\",'Income & Exp'!F:F)"
         ws.cell(row=2, column=8, value=mpesa_ziidi_formula)
-        ws.cell(row=2, column=9, value=new_cash_in_hand)
+        ws.cell(row=2, column=9, value=new_mission_cash_in_hand)
         ws.cell(row=2, column=11, value="=H2+I2")  # Total Cash formula
 
         # Row 3: colored boxes (green for Mpesa, red for Cash, blue for Total)
@@ -1619,7 +1624,7 @@ class ExcelGenerator:
 
         ws.cell(row=7, column=7, value=date_str)
         ws.cell(row=7, column=8, value=bene_mpesa)
-        ws.cell(row=7, column=9, value=bene_cash)
+        ws.cell(row=7, column=9, value=bene_cash_in_hand)
         ws.cell(row=7, column=10, value=0)
         ws.cell(row=7, column=11, value="=H7+I7")
 
