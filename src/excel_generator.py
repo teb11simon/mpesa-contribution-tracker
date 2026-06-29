@@ -1574,7 +1574,8 @@ class ExcelGenerator:
         ws.cell(row=1, column=7).alignment = Alignment(horizontal='center')
 
         # Row 2: Date | Mpesa | Cash | (blank) | Grand Total | Date | Mpesa ZIIDI | Cash In Hand | Bank Account | Total Cash
-        date_str = report_date.strftime("%d-%b-%Y")
+        # Use current date (when report was generated) for the Breakdown tab
+        date_str = datetime.now().strftime("%d-%b-%Y")
         ws.cell(row=2, column=1, value=date_str)
         ws.cell(row=2, column=2, value=cont_mpesa)
         ws.cell(row=2, column=3, value=cont_cash)
