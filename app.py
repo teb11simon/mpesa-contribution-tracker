@@ -691,66 +691,70 @@ elif st.session_state.step == 2:
 
     df = st.session_state.categorized_df
 
-    edited_df = st.data_editor(
-        df,
-        column_config={
-            "ID": st.column_config.NumberColumn("ID", disabled=True),
-            "Type": st.column_config.TextColumn("Type", disabled=True),
-            "Date": st.column_config.TextColumn("Date", disabled=True),
-            "Amount": st.column_config.NumberColumn("Amount", format="Ksh %,.2f", disabled=True),
-            "Sender / Details": st.column_config.TextColumn("Sender / Details", disabled=True),
-            "Category": st.column_config.SelectboxColumn("Category", options=categories_list, required=True),
-            "Notes": st.column_config.TextColumn("Notes (Expense Detail)", help="Notes for receipt details/expenses")
-        },
-        hide_index=True,
-        use_container_width=True,
-        num_rows="fixed"
-    )
+    with st.form("categorization_form"):
+        edited_df = st.data_editor(
+            df,
+            column_config={
+                "ID": st.column_config.NumberColumn("ID", disabled=True),
+                "Type": st.column_config.TextColumn("Type", disabled=True),
+                "Date": st.column_config.TextColumn("Date", disabled=True),
+                "Amount": st.column_config.NumberColumn("Amount", format="Ksh %,.2f", disabled=True),
+                "Sender / Details": st.column_config.TextColumn("Sender / Details", disabled=True),
+                "Category": st.column_config.SelectboxColumn("Category", options=categories_list, required=True),
+                "Notes": st.column_config.TextColumn("Notes (Expense Detail)", help="Notes for receipt details/expenses")
+            },
+            hide_index=True,
+            use_container_width=True,
+            num_rows="fixed"
+        )
 
-    # Store changes
-    st.session_state.categorized_df = edited_df
+        col_back, col_next = st.columns([1, 1])
+        with col_back:
+            back_btn = st.form_submit_button("← Back", use_container_width=True)
+        with col_next:
+            next_btn = st.form_submit_button("✓ Finish & Continue →", use_container_width=True)
 
-    col_back, col_next = st.columns([1, 1])
-    with col_back:
-        if st.button("← Back", use_container_width=True):
-            st.session_state.step = 1
-            st.rerun()
+    if back_btn:
+        st.session_state.step = 1
+        st.rerun()
 
-    with col_next:
-        if st.button("✓ Finish & Continue →", use_container_width=True):
-            # Parse edited categories
-            income = []
-            expense = []
+    if next_btn:
+        # Store changes
+        st.session_state.categorized_df = edited_df
 
-            for idx, row in edited_df.iterrows():
-                t = st.session_state.all_trans[idx]
-                cat = row["Category"]
-                note = str(row["Notes"]).strip()
+        # Parse edited categories
+        income = []
+        expense = []
 
-                if cat == "Ignore":
-                    continue
+        for idx, row in edited_df.iterrows():
+            t = st.session_state.all_trans[idx]
+            cat = row["Category"]
+            note = str(row["Notes"]).strip()
 
-                entry = {
-                    "receipt_no": t.receipt_no,
-                    "date": t.date,
-                    "details": note if note else (t.details or ""),
-                    "amount": t.amount,
-                    "type": t.transaction_type,
-                    "name": t.sender_name,
-                    "sender_name": t.sender_name,
-                    "sender_phone": t.sender_phone,
-                    "category": cat
-                }
+            if cat == "Ignore":
+                continue
 
-                if cat in INCOME_CATEGORIES:
-                    income.append(entry)
-                else:
-                    expense.append(entry)
+            entry = {
+                "receipt_no": t.receipt_no,
+                "date": t.date,
+                "details": note if note else (t.details or ""),
+                "amount": t.amount,
+                "type": t.transaction_type,
+                "name": t.sender_name,
+                "sender_name": t.sender_name,
+                "sender_phone": t.sender_phone,
+                "category": cat
+            }
 
-            st.session_state.income_entries = income
-            st.session_state.expense_entries = expense
-            st.session_state.step = 3
-            st.rerun()
+            if cat in INCOME_CATEGORIES:
+                income.append(entry)
+            else:
+                expense.append(entry)
+
+        st.session_state.income_entries = income
+        st.session_state.expense_entries = expense
+        st.session_state.step = 3
+        st.rerun()
 
 # ═════════════════════════════════════════════════════════════════════════
 #  STEP 3 — Name Matching & Download
