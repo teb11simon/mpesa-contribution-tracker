@@ -940,6 +940,9 @@ class ExcelGenerator:
         # Update Benevolence tab
         if all_transactions:
             self._update_benevolence_tab(all_transactions, date)
+
+        # Create/update Breakdown of Available Funds tab
+        self._create_breakdown_tab(date, all_transactions=all_transactions, members=members)
         
         # Save finally
         self.workbook.save(output_path)
@@ -1462,6 +1465,178 @@ class ExcelGenerator:
         if lower in ("james opwondi", "risper opwondi"):
             return "Opwondis"
         return name
+
+    def _create_breakdown_tab(self, report_date: datetime, all_transactions: Optional[List[Dict]] = None, members: Optional[List[Dict]] = None):
+        """
+        Creates/overwrites the 'Breakdown of Available Funds' tab.
+
+        Layout (matching the church template):
+          Row 1:  'Total Balances' (merged A1:E1) | 'Missions' (merged G1:K1)
+          Row 2:  Date | Mpesa | Cash | (blank) | Grand Total | Date | Mpesa ZIIDI (formula) | Cash In Hand (running total) | Bank Account | Total Cash (formula)
+          Row 3:  (colored boxes)
+          Row 5:  'Contribution' header (merged A5:E5) | 'Benevolence' header (merged G5:K5)
+          Row 6:  Date | Mpesa Mobile Money | Cash In Hand | Bank Account | Total Cash | Date | Mpesa Mobile Money (ZIIDI) | Cash In Hand | Bank Account | Total Cash
+          Row 7:  date row with values
+        """
+        # ── 1. Find or create the Breakdown sheet ─────────────────────
+        sheet_name = f"{report_date.strftime('%d %B, %Y')} Breakdown of Available Funds"
+        # Truncate to Excel's 31-char limit if needed
+        sheet_name = sheet_name[:31]
+
+        # Remove existing sheet with same name if present
+        if sheet_name in self.workbook.sheetnames:
+            del self.workbook[sheet_name]
+
+        ws = self.workbook.create_sheet(sheet_name)
+
+        # ── 2. Compute category totals from all_transactions ──────────
+        def _cat_total(category_name: str) -> float:
+            if not all_transactions:
+                return 0.0
+            return sum(
+                abs(t.get('amount', 0) or 0)
+                for t in all_transactions
+                if (t.get('category') or '').strip().lower() == category_name.lower()
+            )
+
+        contribution_mpesa = _cat_total('Contribution')
+        contribution_cash  = _cat_total('Contribution')
+        benevolence_mpesa  = _cat_total('Benevolence')
+        benevolence_cash   = _cat_total('Benevolence')
+        missions_cash      = _cat_total('Missions')
+
+        # For Contribution/Benevolence, try to split Mpesa vs Cash from matched/unmatched
+        cont_mpesa = 0.0
+        cont_cash  = 0.0
+        bene_mpesa = 0.0
+        bene_cash  = 0.0
+        if all_transactions:
+            for t in all_transactions:
+                cat = (t.get('category') or '').strip().lower()
+                amt = abs(t.get('amount', 0) or 0)
+                src = (t.get('source') or '').strip().lower()
+                if cat == 'contribution':
+                    if src == 'cash':
+                        cont_cash += amt
+                    else:
+                        cont_mpesa += amt
+                elif cat == 'benevolence':
+                    if src == 'cash':
+                        bene_cash += amt
+                    else:
+                        bene_mpesa += amt
+
+        # If split didn't populate, fall back to totals
+        if cont_mpesa == 0 and cont_cash == 0 and contribution_mpesa > 0:
+            cont_mpesa = contribution_mpesa
+            cont_cash  = contribution_mpesa
+        if bene_mpesa == 0 and bene_cash == 0 and benevolence_mpesa > 0:
+            bene_mpesa = benevolence_mpesa
+            bene_cash  = benevolence_mpesa
+
+        # ── 3. Read previous Breakdown sheet for Cash In Hand carry-forward ──
+        prev_cash_in_hand = 0.0
+        prev_sheet = None
+        for name in self.workbook.sheetnames:
+            if 'breakdown' in name.lower() and name != sheet_name:
+                prev_sheet = name
+                break
+
+        if prev_sheet:
+            try:
+                ws_prev = self.workbook[prev_sheet]
+                # Cash In Hand under Missions block is in column H (col 8), row 7 (first data row)
+                # We scan for the Missions block header to locate the right cell
+                for r in range(1, 20):
+                    val = ws_prev.cell(row=r, column=7).value  # col G
+                    if val and 'missions' in str(val).lower():
+                        # Cash In Hand is typically col H (8) in the row below header
+                        prev_cash_in_hand = ws_prev.cell(row=r+1, column=8).value or 0.0
+                        break
+            except Exception:
+                prev_cash_in_hand = 0.0
+
+        new_cash_in_hand = prev_cash_in_hand + missions_cash
+
+        # ── 4. Write Total Balances section ───────────────────────────
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=5)
+        ws.cell(row=1, column=1, value="Total Balances")
+        ws.cell(row=1, column=1).font = Font(bold=True, size=12)
+        ws.cell(row=1, column=1).alignment = Alignment(horizontal='center')
+
+        ws.merge_cells(start_row=1, start_column=7, end_row=1, end_column=11)
+        ws.cell(row=1, column=7, value="Missions")
+        ws.cell(row=1, column=7).font = Font(bold=True, size=12)
+        ws.cell(row=1, column=7).alignment = Alignment(horizontal='center')
+
+        # Row 2: Date | Mpesa | Cash | (blank) | Grand Total | Date | Mpesa ZIIDI | Cash In Hand | Bank Account | Total Cash
+        date_str = report_date.strftime("%d-%b-%Y")
+        ws.cell(row=2, column=1, value=date_str)
+        ws.cell(row=2, column=2, value=cont_mpesa)
+        ws.cell(row=2, column=3, value=cont_cash)
+        ws.cell(row=2, column=5, value="=SUM(B2:C2)")  # Grand Total formula
+
+        # Missions block row 2
+        ws.cell(row=2, column=7, value=date_str)
+        # Mpesa ZIIDI: copy formula from previous sheet if available, else use the known formula
+        mpesa_ziidi_formula = "='Income & Exp'!C3 + Missions!C2 - SUMIF('Income & Exp'!E:E,\"Missions Transfer\",'Income & Exp'!F:F)"
+        ws.cell(row=2, column=8, value=mpesa_ziidi_formula)
+        ws.cell(row=2, column=9, value=new_cash_in_hand)
+        ws.cell(row=2, column=11, value="=H2+I2")  # Total Cash formula
+
+        # Row 3: colored boxes (green for Mpesa, red for Cash, blue for Total)
+        ws.cell(row=3, column=2).fill = PatternFill(start_color='00FF00', end_color='00FF00', fill_type='solid')
+        ws.cell(row=3, column=3).fill = PatternFill(start_color='FF0000', end_color='FF0000', fill_type='solid')
+        ws.cell(row=3, column=5).fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+        ws.cell(row=3, column=8).fill = PatternFill(start_color='00FF00', end_color='00FF00', fill_type='solid')
+        ws.cell(row=3, column=9).fill = PatternFill(start_color='FF0000', end_color='FF0000', fill_type='solid')
+        ws.cell(row=3, column=11).fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+
+        # ── 5. Contribution block header ──────────────────────────────
+        ws.merge_cells(start_row=5, start_column=1, end_row=5, end_column=5)
+        ws.cell(row=5, column=1, value="Contribution")
+        ws.cell(row=5, column=1).font = Font(bold=True, size=11)
+        ws.cell(row=5, column=1).alignment = Alignment(horizontal='center')
+
+        # Benevolence block header
+        ws.merge_cells(start_row=5, start_column=7, end_row=5, end_column=11)
+        ws.cell(row=5, column=7, value="Benevolence")
+        ws.cell(row=5, column=7).font = Font(bold=True, size=11)
+        ws.cell(row=5, column=7).alignment = Alignment(horizontal='center')
+
+        # Row 6 sub-headers
+        for col, label in [(1, "Date"), (2, "Mpesa Mobile Money"), (3, "Cash In Hand"), (4, "Bank Account"), (5, "Total Cash")]:
+            ws.cell(row=6, column=col, value=label).font = Font(bold=True)
+        for col, label in [(7, "Date"), (8, "Mpesa Mobile Money (ZIIDI)"), (9, "Cash In Hand"), (10, "Bank Account"), (11, "Total Cash")]:
+            ws.cell(row=6, column=col, value=label).font = Font(bold=True)
+
+        # Row 7: data
+        ws.cell(row=7, column=1, value=date_str)
+        ws.cell(row=7, column=2, value=cont_mpesa)
+        ws.cell(row=7, column=3, value=cont_cash)
+        ws.cell(row=7, column=4, value=0)
+        ws.cell(row=7, column=5, value="=B7+C7")
+
+        ws.cell(row=7, column=7, value=date_str)
+        ws.cell(row=7, column=8, value=bene_mpesa)
+        ws.cell(row=7, column=9, value=bene_cash)
+        ws.cell(row=7, column=10, value=0)
+        ws.cell(row=7, column=11, value="=H7+I7")
+
+        # Apply borders to data area
+        for r in [2, 3, 7]:
+            for c in range(1, 12):
+                ws.cell(row=r, column=c).border = Border(
+                    left=Side(style='thin'), right=Side(style='thin'),
+                    top=Side(style='thin'), bottom=Side(style='thin')
+                )
+
+        # Number formatting
+        for r in [2, 7]:
+            for c in [2, 3, 5, 8, 9, 11]:
+                ws.cell(row=r, column=c).number_format = '#,##0.00'
+
+        logger.info(f"Created Breakdown tab: {sheet_name}")
 
     def _update_benevolence_tab(self, all_transactions: List[Dict], report_date: datetime):
         """
