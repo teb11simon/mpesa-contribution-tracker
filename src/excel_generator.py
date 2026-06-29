@@ -919,7 +919,7 @@ class ExcelGenerator:
                 self._write_contribution_income_row(date, total_contribution)
 
         # Update Missing Contribution tab
-        self._update_missing_contro_tab(date, members)
+        self._update_missing_contro_tab(date, members, all_transactions=all_transactions)
 
         # Update Missions tab
         if all_transactions:
@@ -1240,14 +1240,14 @@ class ExcelGenerator:
             f"KES {total_amount:,.2f} for Sunday {sunday.strftime('%d-%b-%Y')}."
         )
 
-    def _update_missing_contro_tab(self, report_date: datetime, members: List[Dict]):
+    def _update_missing_contro_tab(self, report_date: datetime, members: List[Dict], all_transactions: Optional[List[Dict]] = None):
         """
         Clears and rewrites the 'Missing Contro' sheet with every member
-        whose contribution this week is 0 or None.
+        whose **Contribution** amount this week is 0 or None.
 
-        Uses the members list (amount already resolved by _update_combined_sheet)
-        rather than reading col 9 of Combined — those cells hold formulas that
-        openpyxl cannot evaluate without Excel.
+        Uses the members list plus the transaction ledger to compute a
+        Contribution-only total, so members who gave Benevolence/Missions
+        but no Contribution are still listed as missing.
 
         Members with a pledge of N/a or blank/non-numeric are excluded.
         """
@@ -1276,7 +1276,19 @@ class ExcelGenerator:
                 break
             pledge_by_row[r] = ws_combined.cell(row=r, column=7).value
 
-        # ── 3. Filter members: zero amount + valid numeric pledge ─────
+        # ── 3. Build Contribution-only totals per member ─────────────────
+        contribution_by_row: Dict[int, float] = {}
+        if all_transactions:
+            for t in all_transactions:
+                category = (t.get('category') or '').strip().lower()
+                if category != 'contribution':
+                    continue
+                member_row = t.get('member_row')
+                if member_row is None:
+                    continue
+                contribution_by_row[member_row] = contribution_by_row.get(member_row, 0.0) + (t.get('amount', 0) or 0)
+
+        # ── 4. Filter members: zero contribution + valid numeric pledge ─
         missing = []
         for m in members:
             pledge = pledge_by_row.get(m.get('row_index'))
@@ -1289,7 +1301,8 @@ class ExcelGenerator:
             except (TypeError, ValueError):
                 continue
 
-            if (m.get('amount') or 0) == 0:
+            contrib_total = contribution_by_row.get(m.get('row_index'), 0.0)
+            if contrib_total == 0:
                 missing.append({
                     'first':  str(m.get('first_name', '')).strip(),
                     'last':   str(m.get('last_name',  '')).strip(),
