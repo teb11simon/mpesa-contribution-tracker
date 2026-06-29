@@ -1504,26 +1504,32 @@ class ExcelGenerator:
         benevolence_total_cash = _cat_total('Benevolence')
         missions_cash      = _cat_total('Missions')
 
-        # For Contribution, try to split Mpesa vs Cash from matched/unmatched
-        cont_mpesa = 0.0
-        cont_cash  = 0.0
+        # For Contribution: compute cash from this week's transactions
+        cont_cash = 0.0
         if all_transactions:
             for t in all_transactions:
                 cat = (t.get('category') or '').strip().lower()
                 amt = abs(t.get('amount', 0) or 0)
                 src = (t.get('source') or '').strip().lower()
-                if cat == 'contribution':
-                    if src == 'cash':
-                        cont_cash += amt
-                    else:
-                        cont_mpesa += amt
+                if cat == 'contribution' and src == 'cash':
+                    cont_cash += amt
 
-        # If split didn't populate, fall back to totals
-        if cont_mpesa == 0 and cont_cash == 0 and contribution_mpesa > 0:
-            cont_mpesa = contribution_mpesa
-            cont_cash  = contribution_mpesa
+        # ── 3a. Read latest running balance from Income & Exp sheet for Contribution total ──
+        cont_total = 0.0
+        if "Income & Exp" in self.workbook.sheetnames:
+            try:
+                ws_ie = self.workbook["Income & Exp"]
+                for r in range(ws_ie.max_row, 5, -1):
+                    b_val = ws_ie.cell(row=r, column=2).value
+                    if b_val is not None and str(b_val).strip() not in ('', '.'):
+                        balance_cell = ws_ie.cell(row=r, column=7).value
+                        if balance_cell is not None:
+                            cont_total = float(balance_cell)
+                        break
+            except Exception:
+                cont_total = 0.0
 
-        # ── 3a. Benevolence: read latest balance from Benevolence sheet ──
+        # ── 3b. Benevolence: read latest balance from Benevolence sheet ──
         bene_total = 0.0
         if "Benevolence" in self.workbook.sheetnames:
             try:
@@ -1537,7 +1543,8 @@ class ExcelGenerator:
             except Exception:
                 bene_total = 0.0
 
-        # ── 3b. Read previous Breakdown sheet for Cash In Hand carry-forward ──
+        # ── 3c. Read previous Breakdown sheet for Cash In Hand carry-forward ──
+        prev_contribution_cash_in_hand = 0.0
         prev_mission_cash_in_hand = 0.0
         prev_bene_cash_in_hand = 0.0
         prev_sheet = None
@@ -1549,15 +1556,22 @@ class ExcelGenerator:
         if prev_sheet:
             try:
                 ws_prev = self.workbook[prev_sheet]
-                # Missions Cash In Hand is col H (8) row 2
+                # Missions Cash In Hand is col I (9) row 2
                 prev_mission_cash_in_hand = ws_prev.cell(row=2, column=9).value or 0.0
+                # Contribution Cash In Hand is col C (3) row 7
+                prev_contribution_cash_in_hand = ws_prev.cell(row=7, column=3).value or 0.0
                 # Benevolence Cash In Hand is col I (9) row 7
                 prev_bene_cash_in_hand = ws_prev.cell(row=7, column=9).value or 0.0
             except Exception:
+                prev_contribution_cash_in_hand = 0.0
                 prev_mission_cash_in_hand = 0.0
                 prev_bene_cash_in_hand = 0.0
 
         new_mission_cash_in_hand = prev_mission_cash_in_hand + missions_cash
+
+        # Contribution: Cash In Hand is running total, Mpesa = Total - Cash
+        contribution_cash_in_hand = prev_contribution_cash_in_hand + cont_cash
+        cont_mpesa = cont_total - contribution_cash_in_hand
 
         # Benevolence: Cash In Hand is running total, Mpesa = Total - Cash
         bene_cash_in_hand = prev_bene_cash_in_hand + benevolence_total_cash
@@ -1618,15 +1632,15 @@ class ExcelGenerator:
         # Row 7: data
         ws.cell(row=7, column=1, value=date_str)
         ws.cell(row=7, column=2, value=cont_mpesa)
-        ws.cell(row=7, column=3, value=cont_cash)
+        ws.cell(row=7, column=3, value=contribution_cash_in_hand)
         ws.cell(row=7, column=4, value=0)
-        ws.cell(row=7, column=5, value="=B7+C7")
+        ws.cell(row=7, column=5, value=cont_total)
 
         ws.cell(row=7, column=7, value=date_str)
         ws.cell(row=7, column=8, value=bene_mpesa)
         ws.cell(row=7, column=9, value=bene_cash_in_hand)
         ws.cell(row=7, column=10, value=0)
-        ws.cell(row=7, column=11, value="=H7+I7")
+        ws.cell(row=7, column=11, value=bene_total)
 
         # Apply borders to data area
         for r in [2, 3, 7]:
