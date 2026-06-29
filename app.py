@@ -34,6 +34,104 @@ EXPENSE_CATEGORIES = [
 ]
 TRANSFER_CATEGORIES = ["Missions Transfer", "Benevolence Transfer", "Contribution Transfer"]
 
+# ── Draft Save / Load Helpers ────────────────────────────────────────────
+def _serialize_draft(session_state) -> bytes:
+    """Serialize current session state to a downloadable JSON draft."""
+    draft = {
+        "version": 2,
+        "step": session_state.get("step", 1),
+        "report_date": session_state.get("report_date", datetime.now()).isoformat() if hasattr(session_state.get("report_date", datetime.now()), 'isoformat') else str(session_state.get("report_date", "")),
+        "attendance": session_state.get("attendance", {}),
+        "cash_breakdown": session_state.get("cash_breakdown", {}),
+        "all_trans": [
+            {
+                "receipt_no": t.receipt_no,
+                "date": t.date.isoformat() if hasattr(t.date, 'isoformat') else str(t.date),
+                "details": t.details,
+                "amount": float(t.amount),
+                "transaction_type": t.transaction_type,
+                "sender_name": t.sender_name,
+                "sender_phone": getattr(t, 'sender_phone', None),
+                "pre_category": getattr(t, 'pre_category', 'Contribution'),
+            }
+            for t in session_state.get("all_trans", [])
+        ],
+        "categorized_df": session_state.get("categorized_df").to_dict(orient="records") if session_state.get("categorized_df") is not None else None,
+        "income_entries": _serialize_entries(session_state.get("income_entries", [])),
+        "expense_entries": _serialize_entries(session_state.get("expense_entries", [])),
+    }
+    return json.dumps(draft, indent=2, default=str).encode("utf-8")
+
+def _serialize_entries(entries):
+    """Make entry dicts JSON-serializable by converting datetimes."""
+    result = []
+    for e in entries:
+        d = dict(e)
+        for k, v in d.items():
+            if hasattr(v, 'isoformat'):
+                d[k] = v.isoformat()
+        result.append(d)
+    return result
+
+def _load_draft(draft_bytes, session_state):
+    """Restore session state from a draft JSON file."""
+    draft = json.loads(draft_bytes)
+    
+    # Restore step
+    session_state.step = draft.get("step", 2)
+    
+    # Restore report date
+    rd = draft.get("report_date", "")
+    try:
+        parsed_date = datetime.fromisoformat(rd)
+        session_state.report_date = parsed_date.date() if hasattr(parsed_date, 'date') else parsed_date
+    except Exception:
+        session_state.report_date = datetime.now().date()
+    
+    session_state.attendance = draft.get("attendance", {})
+    session_state.cash_breakdown = draft.get("cash_breakdown", {})
+    
+    # Restore transactions
+    all_trans = []
+    for td in draft.get("all_trans", []):
+        try:
+            t_date = datetime.fromisoformat(td["date"])
+        except Exception:
+            t_date = datetime.now()
+        t = Transaction(
+            receipt_no=td.get("receipt_no", ""),
+            date=t_date,
+            details=td.get("details", ""),
+            amount=float(td.get("amount", 0)),
+            transaction_type=td.get("transaction_type", "Paid In"),
+            sender_name=td.get("sender_name"),
+            sender_phone=td.get("sender_phone")
+        )
+        t.pre_category = td.get("pre_category", "Contribution")
+        all_trans.append(t)
+    session_state.all_trans = all_trans
+    
+    # Restore categorized dataframe
+    cat_data = draft.get("categorized_df")
+    if cat_data:
+        session_state.categorized_df = pd.DataFrame(cat_data)
+    
+    # Restore income / expense entries
+    def _parse_entries(entries_list):
+        result = []
+        for e in (entries_list or []):
+            d = dict(e)
+            if "date" in d and isinstance(d["date"], str):
+                try:
+                    d["date"] = datetime.fromisoformat(d["date"])
+                except Exception:
+                    pass
+            result.append(d)
+        return result
+    
+    session_state.income_entries = _parse_entries(draft.get("income_entries", []))
+    session_state.expense_entries = _parse_entries(draft.get("expense_entries", []))
+
 # ── Helper: Get church directory ────────────────────────────────────────
 def get_church_dir(church_slug: str) -> Path:
     """Get the filesystem directory for a given church."""
@@ -546,6 +644,17 @@ st.markdown("---")
 if st.session_state.step == 1:
     st.markdown(f"### Upload M-Pesa PDF & Ledger Template — {church_name}")
 
+    # Resume from Draft
+    with st.expander("📤 Resume from a Saved Draft", expanded=False):
+        draft_file = st.file_uploader("Upload a previously saved draft (.json)", type=["json"], key="draft_uploader")
+        if draft_file is not None:
+            try:
+                _load_draft(draft_file.read(), st.session_state)
+                st.success("✅ Draft loaded! Resuming your session...")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to load draft: {e}")
+
     col1, col2 = st.columns(2)
 
     with col1:
@@ -708,15 +817,30 @@ elif st.session_state.step == 2:
             num_rows="fixed"
         )
 
-        col_back, col_next = st.columns([1, 1])
+        col_back, col_save, col_next = st.columns([1, 1, 1])
         with col_back:
             back_btn = st.form_submit_button("← Back", use_container_width=True)
+        with col_save:
+            save_btn = st.form_submit_button("📥 Save Draft", use_container_width=True)
         with col_next:
             next_btn = st.form_submit_button("✓ Finish & Continue →", use_container_width=True)
 
     if back_btn:
         st.session_state.step = 1
         st.rerun()
+
+    if save_btn:
+        st.session_state.categorized_df = edited_df
+        draft_data = _serialize_draft(st.session_state)
+        report_dt = st.session_state.get("report_date", datetime.now())
+        fname = f"draft_{church_slug}_{report_dt}.json" if not hasattr(report_dt, 'strftime') else f"draft_{church_slug}_{report_dt.strftime('%Y%m%d')}.json"
+        st.download_button(
+            label="⬇️ Download Draft File",
+            data=draft_data,
+            file_name=fname,
+            mime="application/json",
+            use_container_width=True
+        )
 
     if next_btn:
         # Store changes
@@ -892,11 +1016,23 @@ elif st.session_state.step == 3:
     st.markdown("---")
     st.markdown("#### 2. Generate and Download Final Report")
 
-    col_back, col_gen = st.columns([1, 1])
+    col_back, col_save3, col_gen = st.columns([1, 1, 1])
     with col_back:
         if st.button("← Back to Categorization", use_container_width=True):
             st.session_state.step = 2
             st.rerun()
+
+    with col_save3:
+        draft_data_3 = _serialize_draft(st.session_state)
+        report_dt_3 = st.session_state.get("report_date", datetime.now())
+        fname_3 = f"draft_{church_slug}_{report_dt_3}.json" if not hasattr(report_dt_3, 'strftime') else f"draft_{church_slug}_{report_dt_3.strftime('%Y%m%d')}.json"
+        st.download_button(
+            label="📥 Save Draft",
+            data=draft_data_3,
+            file_name=fname_3,
+            mime="application/json",
+            use_container_width=True
+        )
 
     with col_gen:
         if st.button("✨ Compile Final Excel Report", use_container_width=True, type="primary"):
