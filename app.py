@@ -361,6 +361,23 @@ if profile.get("status") == "rejected":
 #  AUTHENTICATED – Render App
 # ═════════════════════════════════════════════════════════════════════════
 
+# Initialize Singletons (per-church) — MUST happen before sidebar uses them
+@st.cache_resource
+def get_processor(church_slug_param: str = "nairobi-icc"):
+    return ContributionProcessor(church_slug=church_slug_param)
+
+@st.cache_resource
+def get_ocr_processor(ocr_backend: str = "tesseract"):
+    return OCRProcessor(ocr_backend=ocr_backend)
+
+@st.cache_resource
+def get_mpesa_parser():
+    return MpesaParser()
+
+processor = get_processor(church_slug)
+ocr_proc = get_ocr_processor(st.session_state.get("ocr_backend", "tesseract"))
+parser = get_mpesa_parser()
+
 # Sidebar with user info
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/money-transfer.png", width=80)
@@ -609,23 +626,6 @@ if "attendance" not in st.session_state:
     st.session_state.attendance = {"men": 0, "women": 0, "children": 0}
 if "categorized_df" not in st.session_state:
     st.session_state.categorized_df = None
-
-# Initialize Singletons (per-church)
-@st.cache_resource
-def get_processor(church_slug_param: str = "nairobi-icc"):
-    return ContributionProcessor(church_slug=church_slug_param)
-
-@st.cache_resource
-def get_ocr_processor(ocr_backend: str = "tesseract"):
-    return OCRProcessor(ocr_backend=ocr_backend)
-
-@st.cache_resource
-def get_mpesa_parser():
-    return MpesaParser()
-
-processor = get_processor(church_slug)
-ocr_proc = get_ocr_processor(st.session_state.get("ocr_backend", "tesseract"))
-parser = get_mpesa_parser()
 
 # Steps Wizard Headers
 cols = st.columns(3)
