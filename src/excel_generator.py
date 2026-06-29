@@ -1424,6 +1424,8 @@ class ExcelGenerator:
             date_val = t.get('date') or datetime.now()
             # Use the matched/converted name, falling back to raw sender_name
             name_val = (t.get('name') or t.get('sender_name') or '').strip()
+            # Normalize specific family names for Missions tab display
+            name_val = self._normalize_missions_name(name_val)
             amount   = abs(t.get('amount', 0) or 0)
 
             # Dedup check
@@ -1451,6 +1453,15 @@ class ExcelGenerator:
             new_count += 1
 
         logger.info(f"Missions: appended {new_count} new transaction(s).")
+
+    def _normalize_missions_name(self, name: str) -> str:
+        """Normalize specific family names for the Missions tab."""
+        lower = name.strip().lower()
+        if lower == "deji aregbesola":
+            return "Aregbesolas"
+        if lower in ("james opwondi", "risper opwondi"):
+            return "Opwondis"
+        return name
 
     def _update_benevolence_tab(self, all_transactions: List[Dict], report_date: datetime):
         """
