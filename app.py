@@ -703,14 +703,23 @@ if st.session_state.step == 1:
         elif not uploaded_pdf and not img_contrib and not img_benev and not img_missions:
             st.error("Please upload at least one M-Pesa statement or Cash note image.")
         else:
-            with st.spinner("Processing statement and images..."):
-                # Save ledger template locally temporarily
-                temp_dir = tempfile.gettempdir()
-                temp_template_path = os.path.join(temp_dir, f"{church_slug}_temp_template.xlsx")
-                with open(temp_template_path, "wb") as f:
-                    f.write(uploaded_template.getbuffer())
+            # Validate template file format before processing
+            template_ext = Path(uploaded_template.name).suffix.lower()
+            if template_ext not in ('.xlsx', '.xlsm', '.xltx', '.xltm'):
+                st.error(
+                    f"❌ Invalid template format: **{template_ext}**\n\n"
+                    "Please upload a valid Excel file (.xlsx, .xlsm, .xltx, or .xltm).\n\n"
+                    "If your file is .xls (old format), open it in Excel and re-save as .xlsx."
+                )
+            else:
+                with st.spinner("Processing statement and images..."):
+                    # Save ledger template locally temporarily
+                    temp_dir = tempfile.gettempdir()
+                    temp_template_path = os.path.join(temp_dir, f"{church_slug}_temp_template.xlsx")
+                    with open(temp_template_path, "wb") as f:
+                        f.write(uploaded_template.getbuffer())
 
-                st.session_state.temp_template_path = temp_template_path
+                    st.session_state.temp_template_path = temp_template_path
                 st.session_state.report_date = report_date
                 st.session_state.attendance = {"men": men_count, "women": women_count, "children": children_count}
 
@@ -893,7 +902,20 @@ elif st.session_state.step == 3:
                 members = processor.prepare_template(st.session_state.temp_template_path)
                 st.session_state.members = members
             except Exception as e:
-                st.error(f"Error loading members: {e}")
+                error_msg = str(e)
+                if "openpyxl does not support file format" in error_msg or "does not support file format" in error_msg:
+                    st.error(
+                        "❌ **Invalid or Corrupted Excel File**\n\n"
+                        "The template file you uploaded is not a valid Excel format that openpyxl can read.\n\n"
+                        "**To fix this:**\n"
+                        "1. Open the file in Microsoft Excel or LibreOffice\n"
+                        "2. Go to **File → Save As**\n"
+                        "3. Choose **Excel Workbook (*.xlsx)** as the format\n"
+                        "4. Save the file and upload it again\n\n"
+                        "**Note:** If your file is .xls (old Excel format), it must be converted to .xlsx."
+                    )
+                else:
+                    st.error(f"Error loading members: {error_msg}")
                 st.stop()
     else:
         # Just ensure template is prepared for processor
