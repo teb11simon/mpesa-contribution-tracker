@@ -685,6 +685,40 @@ if st.session_state.step == 1:
     with col2:
         st.markdown("#### 3. Master Ledger Template (Required)")
         uploaded_template = st.file_uploader(f"Upload {church_name}'s Last Completed Report Template (.xlsx)", type="xlsx")
+        
+        # Validate template immediately when uploaded
+        if uploaded_template is not None:
+            template_ext = Path(uploaded_template.name).suffix.lower()
+            if template_ext not in ('.xlsx', '.xlsm', '.xltx', '.xltm'):
+                st.error(f"❌ Invalid format: {template_ext}. Please upload .xlsx, .xlsm, .xltx, or .xltm")
+            else:
+                # Try to validate the file can be opened by openpyxl
+                try:
+                    import openpyxl
+                    temp_dir = tempfile.gettempdir()
+                    test_path = os.path.join(temp_dir, f"{church_slug}_template_test.xlsx")
+                    with open(test_path, "wb") as f:
+                        f.write(uploaded_template.getbuffer())
+                    # Try to load it
+                    wb = openpyxl.load_workbook(test_path, read_only=True)
+                    wb.close()
+                    st.success(f"✅ Template loaded: {uploaded_template.name}")
+                except Exception as e:
+                    error_msg = str(e)
+                    if "openpyxl does not support file format" in error_msg or "does not support file format" in error_msg:
+                        st.error(
+                            "❌ **Invalid or Corrupted Excel File**\n\n"
+                            f"File: **{uploaded_template.name}**\n\n"
+                            "This file is not a valid .xlsx format that openpyxl can read.\n\n"
+                            "**To fix this:**\n"
+                            "1. Open the file in **Microsoft Excel** or **LibreOffice**\n"
+                            "2. Go to **File → Save As**\n"
+                            "3. Choose **Excel Workbook (*.xlsx)** as the format\n"
+                            "4. Save the file and upload it again\n\n"
+                            "**Note:** If your file is .xls (old Excel 97-2003 format), it must be converted to .xlsx."
+                        )
+                    else:
+                        st.warning(f"⚠️ Template validation warning: {error_msg}")
 
         st.markdown("#### 4. Settings & Metadata")
         report_date = st.date_input("Sunday Report Date", datetime.now())
