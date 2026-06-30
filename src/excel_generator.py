@@ -1,4 +1,4 @@
- """
+"""
 Excel Generator
 Creates Excel contribution reports by updating a master template workbook.
 Supports formula preservation and automated sheet linking.
